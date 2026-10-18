@@ -1,0 +1,11 @@
+__pycache__/
+*.pyc
+*.db
+*.db-*
+*.lock
+*.htm
+*.har
+*.epub
+downloads/
+.env
+browser/profile/

@@ -1,0 +1,189 @@
+"""Normal Chromium rendering via CDP; no CAPTCHA solving or access-control bypass.
+
+Only opens its own tab. No fingerprint modifications, hidden API replay, cookie
+exports, point purchases, credential entry, or proxy switching.
+"""
+import json
+import ipaddress
+import socket
+import threading
+import time
+import urllib.request
+from urllib.parse import urlsplit, urlunsplit
+
+try:
+    from .parser import SiteError, Blocked, Pending, Cancelled, origin, viewer_config, validate_body, check_page
+except ImportError:
+    from parser import SiteError, Blocked, Pending, Cancelled, origin, viewer_config, validate_body, check_page
+
+
+class NoRedirect(urllib.request.HTTPRedirectHandler):
+    def redirect_request(self, *args, **kwargs):
+        return None
+
+
+BODY_EXPRESSION = r'''(() => {
+  const host = document.querySelector('[data-theme-novel-content]');
+  const root = host && host.shadowRoot;
+  const notice = host && !root ? (host.innerText || '') : (!host ? (document.body.innerText || '').slice(0, 1000) : '');
+  const nodes = root ? Array.from(root.children).filter(n => n.tagName !== 'STYLE') : [];
+  let gate = {};
+  try { gate = JSON.parse(document.getElementById('theme-novel-viewer-data').textContent).paidGate || {}; } catch(e) {}
+  return {rendered: !!root && nodes.length > 0,
+    text: nodes.map(n => n.innerText || n.textContent || '').join('\n\n'),
+    images: root ? root.querySelectorAll('img,svg,canvas,video').length : 0,
+    message: notice, title: document.title, locked: gate.active === true || gate.locked === true || !!document.querySelector('[data-theme-novel-unlock]')};
+})()'''
+
+
+def endpoint(value):
+    u = urlsplit(str(value).strip())
+    if u.scheme not in ('http', 'https') or not u.hostname or u.username or u.password or u.path not in ('', '/') or u.query or u.fragment:
+        raise SiteError('브라우저 주소는 http://newtoki-browser:9223 같은 내부 주소여야 합니다.')
+    try:
+        port = u.port or (443 if u.scheme == 'https' else 80)
+        addresses = socket.getaddrinfo(u.hostname, port, type=socket.SOCK_STREAM)
+        if not addresses or any(not (ipaddress.ip_address(x[4][0]).is_private or ipaddress.ip_address(x[4][0]).is_loopback) for x in addresses):
+            raise ValueError()
+    except (OSError, ValueError):
+        raise SiteError('브라우저 주소를 내부 IP로 확인하지 못했습니다. 컨테이너 네트워크/주소를 확인하세요.') from None
+    return urlunsplit((u.scheme, u.netloc, '', '', ''))
+
+
+class BrowserClient:
+    def __init__(self, base_url, browser_url, delay=3, stop=None, timeout=30):
+        self.base = origin(base_url)
+        self.address = endpoint(browser_url)
+        self.stop = stop or threading.Event()
+        self.delay, self.timeout = max(2, float(delay)), max(10, min(90, int(timeout)))
+        self.last_request, self.sequence = 0, 0
+        self.ws, self.target, self.keep_tab = None, None, False
+
+    def check(self):
+        if self.stop.is_set():
+            raise Cancelled('중지했습니다.')
+
+    def discovery(self, path, method='GET'):
+        try:
+            req = urllib.request.Request(self.address + path, method=method, headers={'Host': 'localhost', 'Accept': 'application/json'})
+            with urllib.request.build_opener(NoRedirect(), urllib.request.ProxyHandler({})).open(req, timeout=10) as response:
+                raw = response.read(1024 * 1024 + 1)
+            if len(raw) > 1024 * 1024:
+                raise ValueError()
+            return json.loads(raw.decode('utf-8'))
+        except Exception:
+            raise SiteError('Chromium 연결 실패. 브라우저 컨테이너와 CDP 주소/포트(9223)를 확인하세요.') from None
+
+    def connect(self):
+        if self.ws:
+            return
+        try:
+            import websocket
+        except ImportError:
+            raise SiteError('FF Python에 websocket-client가 필요합니다. README의 설치 명령을 실행하세요.') from None
+        self.discovery('/json/version')
+        info = self.discovery('/json/new?about:blank', method='PUT')
+        self.target = info.get('id')
+        wsurl = urlsplit(info.get('webSocketDebuggerUrl', ''))
+        if not self.target or not wsurl.path.startswith('/devtools/page/'):
+            raise SiteError('브라우저가 새 작업 탭 주소를 반환하지 않았습니다.')
+        u = urlsplit(self.address)
+        address = urlunsplit(('wss' if u.scheme == 'https' else 'ws', u.netloc, wsurl.path, '', ''))
+        try:
+            self.ws = websocket.create_connection(address, timeout=1, suppress_origin=True,
+                                                  host='localhost', http_no_proxy=[u.hostname])
+            self.call('Page.enable')
+        except Exception:
+            self.close()
+            raise SiteError('브라우저 WebSocket 연결 실패. CDP 중계 컨테이너를 확인하세요.') from None
+
+    def call(self, method, params=None):
+        self.check()
+        self.sequence += 1
+        ident = self.sequence
+        self.ws.send(json.dumps({'id': ident, 'method': method, 'params': params or {}}))
+        deadline = time.monotonic() + self.timeout
+        while time.monotonic() < deadline:
+            self.check()
+            try:
+                raw = self.ws.recv()
+            except Exception as exc:
+                if type(exc).__name__ in ('WebSocketTimeoutException', 'TimeoutError'):
+                    continue
+                raise SiteError('브라우저 연결이 끊어졌습니다.') from None
+            if not raw or len(raw) > 12 * 1024 * 1024:
+                raise SiteError('브라우저 응답이 없거나 너무 큽니다.')
+            message = json.loads(raw)
+            if message.get('id') == ident:
+                if message.get('error'):
+                    raise SiteError('브라우저 명령에 실패했습니다: ' + method)
+                return message.get('result', {})
+        raise SiteError('브라우저 응답 시간이 초과되었습니다.')
+
+    def evaluate(self, expression):
+        response = self.call('Runtime.evaluate', {'expression': expression, 'returnByValue': True})
+        if response.get('exceptionDetails'):
+            raise SiteError('페이지 구조를 읽지 못했습니다.')
+        return response.get('result', {}).get('value')
+
+    def html(self, path):
+        if not path.startswith('/novel/'):
+            raise SiteError('작품 페이지 경로만 열 수 있습니다.')
+        self.connect()
+        if self.stop.wait(max(0, self.last_request + self.delay - time.monotonic())):
+            self.check()
+        self.last_request = time.monotonic()
+        result = self.call('Page.navigate', {'url': self.base + path})
+        if result.get('errorText'):
+            raise SiteError('페이지 탐색 실패: ' + result['errorText'])
+        deadline = time.monotonic() + self.timeout
+        while time.monotonic() < deadline:
+            self.check()
+            state = self.evaluate("({url:location.href, ready:document.readyState, html:document.documentElement.outerHTML})") or {}
+            actual = state.get('url', '')
+            if actual != 'about:blank':
+                if origin(actual) != self.base:
+                    raise SiteError('다른 도메인으로 이동했습니다. 도메인 확인을 실행하세요.')
+                check_page(state.get('html', ''))
+                expected = urlsplit(self.base + path)
+                if urlsplit(actual).path != expected.path or urlsplit(actual).query != expected.query:
+                    if state.get('ready') == 'complete':
+                        raise Blocked('요청 회차 대신 다른 페이지가 열렸습니다. 브라우저에서 접근 상태를 확인하세요.')
+                elif state.get('ready') in ('interactive', 'complete'):
+                    return state.get('html', '')
+            self.stop.wait(0.3)
+        raise SiteError('페이지 로딩 시간이 초과되었습니다.')
+
+    def body(self, nid, item):
+        path = '/novel/%s/%s' % (nid, item['id'])
+        html = self.html(path)
+        meta = viewer_config(html, nid, item['id'])
+        if int(meta.get('no') or 0) != int(item['no']):
+            raise SiteError('목록과 본문의 회차 번호가 다릅니다.')
+        deadline = time.monotonic() + self.timeout
+        while time.monotonic() < deadline:
+            self.check()
+            current = self.evaluate('location.href')
+            if origin(current) != self.base or urlsplit(current).path != path:
+                raise Blocked('본문 로딩 중 다른 페이지로 이동했습니다.')
+            state = self.evaluate(BODY_EXPRESSION)
+            try:
+                text = validate_body(state)
+                return text
+            except Pending:
+                self.stop.wait(0.5)
+        raise Pending('본문이 표시되지 않았습니다. 전용 브라우저의 해당 탭을 확인하세요.')
+
+    def close(self):
+        if self.ws:
+            self.ws.close()
+            self.ws = None
+        if self.target and not self.keep_tab:
+            try:
+                # /json/close returns a plain string, unlike the discovery endpoints.
+                req = urllib.request.Request(self.address + '/json/close/' + self.target, headers={'Host': 'localhost'})
+                with urllib.request.build_opener(NoRedirect(), urllib.request.ProxyHandler({})).open(req, timeout=3) as response:
+                    response.read(1024)
+            except Exception:
+                pass
+        self.target = None
