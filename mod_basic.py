@@ -11,6 +11,7 @@ from framework import F, Job
 from plugin import PluginModuleBase
 from .parser import SiteError, novel_id, title_ids, origin
 from .engine import Engine
+from .storage import browse_folders, check_storage
 
 
 class ModuleBasic(PluginModuleBase):
@@ -104,6 +105,10 @@ class ModuleBasic(PluginModuleBase):
             if not expected or not secrets.compare_digest(expected, req.form.get('csrf_token', '')):
                 return jsonify(ret='error', msg='페이지를 새로고침하세요.'), 403
             engine = self._engine()
+            if command == 'browse_path':
+                return jsonify(ret='success', folders=browse_folders(str(arg1 or '')))
+            if command == 'check_path':
+                return jsonify(ret='success', storage=check_storage(arg1))
             if command == 'status':
                 return jsonify(ret='success', state=engine.snapshot())
             if command == 'history':

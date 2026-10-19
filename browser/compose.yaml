@@ -1,11 +1,13 @@
 # Portainer Stack. Set NAS_LAN_IP, BROWSER_PASSWORD, PUID and PGID first.
-# CDP (9222/9223) is NOT published on the NAS or Internet.
+# CDP 9223 is published only on NAS loopback; 9222 is not published.
 services:
   newtoki-browser:
     image: lscr.io/linuxserver/chromium:latest
     container_name: newtoki-browser
+    # A stable hostname prevents profile locks referencing an old container ID.
+    hostname: newtoki-browser
     environment:
-      PUID: ${PUID:-1026}
+      PUID: ${PUID:-1036}
       PGID: ${PGID:-100}
       TZ: Asia/Seoul
       LC_ALL: ko_KR.UTF-8
@@ -16,6 +18,8 @@ services:
       - /volume1/docker/newtoki-browser:/config
     ports:
       - "${NAS_LAN_IP:?Set the NAS private LAN IP}:3011:3001"
+      # FF in host network mode reaches CDP through the NAS loopback interface.
+      - "127.0.0.1:9223:9223"
     shm_size: 1gb
     restart: unless-stopped
     networks:
