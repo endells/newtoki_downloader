@@ -52,7 +52,7 @@ class FFTests(unittest.TestCase):
     def test_menu_templates_render_and_escape(self):
         from flask import session
         self.settings.set('titles','123')
-        for page in ('setting','manual','history'):
+        for page in ('setting','manual','history','integration','activity'):
             with self.app.test_request_context('/'):
                 output=self.module.process_menu(page,None)
                 self.assertIn('newtoki_downloader/ajax/basic/command',output)
@@ -80,6 +80,32 @@ class FFTests(unittest.TestCase):
         self.module.engine.update(status='verification_required')
         self.module.scheduler_function()
         self.assertIsNone(self.module.engine.thread)
+
+    def send(self, command, data=''):
+        from flask import session, request
+        with self.app.test_request_context('/',method='POST',data={'csrf_token':'abc'}):
+            session['newtoki_csrf']='abc'
+            return self.module.process_command(command,data,'','',request).get_json()
+
+    def test_integration_schedule_no_download(self):
+        raw={'token':'123456:'+'A'*30,'channel':'-100123','enabled':True,'interval_minutes':5}
+        self.assertEqual(self.send('telegram_save',json.dumps(raw))['ret'],'success')
+        first=self.scheduler.jobs['newtoki-test_telegram']
+        self.send('telegram_save',json.dumps(raw))
+        self.assertIs(first,self.scheduler.jobs['newtoki-test_telegram'])
+        raw['interval_minutes']=10
+        self.send('telegram_save',json.dumps(raw))
+        self.assertIsNot(first,self.scheduler.jobs['newtoki-test_telegram'])
+        self.assertFalse(self.scheduler.jobs['newtoki-test_telegram'][1])
+        self.assertIsNone(self.module.engine.thread)
+        self.assertNotIn(raw['token'],json.dumps(self.send('integration_settings')))
+
+    def test_title_removal_preserves_history_and_files(self):
+        self.send('add_auto','123');self.send('add_auto','123')
+        self.assertEqual(len(self.send('titles')['rows']),1)
+        self.send('remove_auto','123')
+        self.assertEqual(self.send('titles')['rows'],[])
+        self.assertTrue(Path(self.module.engine.history.path).exists())
 
 
 if __name__=='__main__':unittest.main()

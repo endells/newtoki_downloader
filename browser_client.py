@@ -174,6 +174,34 @@ class BrowserClient:
                 self.stop.wait(0.5)
         raise Pending('본문이 표시되지 않았습니다. 전용 브라우저의 해당 탭을 확인하세요.')
 
+    def cover(self, url):
+        """Read a cover already loaded by the ordinary catalog page."""
+        import base64
+        if not url or urlsplit(url).scheme != 'https':
+            raise SiteError('작품 표지 주소를 찾지 못했습니다.')
+        deadline = time.monotonic() + min(self.timeout, 10)
+        while time.monotonic() < deadline:
+            self.check()
+            loaded = self.evaluate("Array.from(document.images).some(i => (i.currentSrc === " + json.dumps(url) + " || i.src === " + json.dumps(url) + ") && i.complete && i.naturalWidth > 0)")
+            if loaded:
+                break
+            self.stop.wait(.25)
+        tree = self.call('Page.getResourceTree')['frameTree']
+        def resources(node):
+            for resource in node.get('resources', []):
+                yield node['frame']['id'], resource
+            for child in node.get('childFrames', []):
+                yield from resources(child)
+        for frame, resource in resources(tree):
+            if resource.get('url') == url and resource.get('type') == 'Image':
+                data = self.call('Page.getResourceContent', {'frameId': frame, 'url': url})
+                if data.get('base64Encoded'):
+                    payload = base64.b64decode(data['content'], validate=True)
+                    if len(payload) > 10 * 1024 * 1024:
+                        raise SiteError('표지 이미지가 10MB를 넘습니다.')
+                    return payload
+        raise SiteError('표지 이미지가 브라우저에 로딩되지 않았습니다.')
+
     def close(self):
         if self.ws:
             self.ws.close()

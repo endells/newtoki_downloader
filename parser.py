@@ -180,7 +180,19 @@ def parse_catalog(html, url):
         if label and val and clean(label.text()) == '작가':
             author = clean(val.text())
     description = doc.first(cls='theme-detail-description')
-    return {'id': nid, 'title': clean(title_node.text()), 'author': author,
+    cover = ''
+    # Prefer the site's cover container, then its social cover metadata.
+    container = doc.first(cls='theme-detail-cover') or doc.first(cls='theme-detail-thumb') or doc.first(cls='view-img')
+    image = container.first(tag='img') if container else None
+    if image:
+        cover = urljoin(url, image.attrs.get('data-src') or image.attrs.get('src', ''))
+    if not cover:
+        meta = next((m for m in doc.walk(tag='meta') if m.attrs.get('property') == 'og:image'), None)
+        if meta:
+            cover = urljoin(url, meta.attrs.get('content', ''))
+    if urlsplit(cover).scheme != 'https':
+        cover = ''
+    return {'cover_url': cover, 'id': nid, 'title': clean(title_node.text()), 'author': author,
             'description': description.text().strip() if description else '',
             'episodes': episodes, 'pages': sorted(pages)}
 

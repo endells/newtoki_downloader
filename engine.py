@@ -131,7 +131,8 @@ def valid_record(row, root):
         return False
 
 
-def make_epub(folder, book, records, check=lambda: None):
+def make_epub(folder, book, records, check=lambda: None, config=None):
+    config = config or {}
     if not records:
         return
     buffer = io.BytesIO()
@@ -139,6 +140,15 @@ def make_epub(folder, book, records, check=lambda: None):
     with zipfile.ZipFile(buffer, 'w', zipfile.ZIP_DEFLATED) as z:
         z.writestr('mimetype', 'application/epub+zip', compress_type=zipfile.ZIP_STORED)
         z.writestr('META-INF/container.xml', '<?xml version="1.0"?><container version="1.0" xmlns="urn:oasis:names:tc:opendocument:xmlns:container"><rootfiles><rootfile full-path="OEBPS/content.opf" media-type="application/oebps-package+xml"/></rootfiles></container>')
+        cover_meta = ''
+        cover = cover_file(folder)
+        if cover:
+            path, mime = cover
+            z.writestr('OEBPS/' + path.name, path.read_bytes())
+            z.writestr('OEBPS/cover.xhtml', '<?xml version="1.0" encoding="utf-8"?><html xmlns="http://www.w3.org/1999/xhtml"><head><title>표지</title></head><body style="margin:0;text-align:center"><img src="' + path.name + '" alt="표지" style="max-width:100%;max-height:100%"/></body></html>')
+            manifest += ['<item id="cover-image" href="' + path.name + '" media-type="' + mime + '" properties="cover-image"/>', '<item id="cover-page" href="cover.xhtml" media-type="application/xhtml+xml"/>']
+            spine.append('<itemref idref="cover-page"/>')
+            cover_meta = '<meta name="cover" content="cover-image"/>'
         for index, row in enumerate(records):
             check()
             title = '%s. %s' % (row['no'], row['title'])
@@ -147,15 +157,38 @@ def make_epub(folder, book, records, check=lambda: None):
                 text = text.split('\n\n', 1)[1]
             name = 'chapter-%s.xhtml' % row['episode_id']
             paragraphs = ''.join('<p>' + escape(p).replace('\n', '<br/>') + '</p>' for p in text.split('\n\n') if p.strip())
-            xhtml = '<?xml version="1.0" encoding="utf-8"?><html xmlns="http://www.w3.org/1999/xhtml" xml:lang="ko"><head><title>' + escape(title) + '</title><style>body{line-height:1.8}p{margin:0 0 .8em}</style></head><body><h2>' + escape(title) + '</h2>' + paragraphs + '</body></html>'
+            xhtml = '<?xml version="1.0" encoding="utf-8"?><html xmlns="http://www.w3.org/1999/xhtml" xml:lang="ko"><head><title>' + escape(title) + '</title><style>body{line-height:' + str(float(config.get('epub_line_height', 1.8))) + '}p{margin:0 0 ' + str(float(config.get('epub_paragraph_gap', .55))) + 'em}</style></head><body><h2>' + escape(title) + '</h2>' + paragraphs + '</body></html>'
             z.writestr('OEBPS/' + name, xhtml)
             manifest.append('<item id="c%s" href="%s" media-type="application/xhtml+xml"/>' % (index, name))
             spine.append('<itemref idref="c%s"/>' % index)
             nav.append('<li><a href="%s">%s</a></li>' % (name, escape(title)))
         z.writestr('OEBPS/nav.xhtml', '<?xml version="1.0" encoding="utf-8"?><html xmlns="http://www.w3.org/1999/xhtml" xmlns:epub="http://www.idpf.org/2007/ops"><head><title>목차</title></head><body><nav epub:type="toc"><ol>' + ''.join(nav) + '</ol></nav></body></html>')
-        z.writestr('OEBPS/content.opf', '<?xml version="1.0" encoding="utf-8"?><package xmlns="http://www.idpf.org/2007/opf" version="3.0" unique-identifier="book-id"><metadata xmlns:dc="http://purl.org/dc/elements/1.1/"><dc:identifier id="book-id">newtoki:' + book['id'] + '</dc:identifier><dc:title>' + escape(book['title']) + '</dc:title><dc:creator>' + escape(book.get('author') or '') + '</dc:creator><dc:language>ko</dc:language><meta property="dcterms:modified">' + datetime.now(timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ') + '</meta></metadata><manifest><item id="nav" href="nav.xhtml" properties="nav" media-type="application/xhtml+xml"/>' + ''.join(manifest) + '</manifest><spine>' + ''.join(spine) + '</spine></package>')
+        z.writestr('OEBPS/content.opf', '<?xml version="1.0" encoding="utf-8"?><package xmlns="http://www.idpf.org/2007/opf" version="3.0" unique-identifier="book-id"><metadata xmlns:dc="http://purl.org/dc/elements/1.1/"><dc:identifier id="book-id">newtoki:' + book['id'] + '</dc:identifier><dc:title>' + escape(book['title']) + '</dc:title><dc:creator>' + escape(book.get('author') or '') + '</dc:creator><dc:language>ko</dc:language><meta property="dcterms:modified">' + datetime.now(timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ') + '</meta>' + cover_meta + '<dc:description>' + escape(book.get('description', '')) + '</dc:description></metadata><manifest><item id="nav" href="nav.xhtml" properties="nav" media-type="application/xhtml+xml"/>' + ''.join(manifest) + '</manifest><spine>' + ''.join(spine) + '</spine></package>')
     check()
     atomic_write(safe_path(folder, safe_name(book['title']) + '.epub'), buffer.getvalue())
+
+
+def image_type(data):
+    if data.startswith(b'\xff\xd8\xff'):
+        return 'jpg', 'image/jpeg'
+    if data.startswith(b'\x89PNG\r\n\x1a\n'):
+        return 'png', 'image/png'
+    if data.startswith(b'RIFF') and data[8:12] == b'WEBP':
+        return 'webp', 'image/webp'
+    raise SiteError('표지 응답이 JPEG/PNG/WebP 이미지가 아닙니다.')
+
+
+def cover_file(folder):
+    for ext in ('jpg', 'png', 'webp'):
+        path = safe_path(folder, 'cover.' + ext)
+        if path.is_file():
+            try:
+                actual, mime = image_type(path.read_bytes())
+                if actual == ext:
+                    return path, mime
+            except (OSError, SiteError):
+                pass
+    return None
 
 
 class Engine:
@@ -164,7 +197,12 @@ class Engine:
         self.guard, self.stop = threading.Lock(), threading.Event()
         self.lock_path = str(db_path) + '.lock'
         self.thread = None
+        self.history.query('CREATE TABLE IF NOT EXISTS books (id TEXT PRIMARY KEY, title TEXT, author TEXT, updated TEXT)')
         self.state = {'status': 'idle', 'message': '대기 중', 'completed': 0, 'skipped': 0, 'failed': 0}
+
+    def book_info(self, nid):
+        rows = self.history.query('SELECT title,author,updated FROM books WHERE id=?', (nid,))
+        return rows[0] if rows else {'title': '분석 전', 'author': '', 'updated': ''}
 
     def update(self, **values):
         with self.guard:
@@ -231,6 +269,7 @@ class Engine:
 
     def run(self, kind, ids, config, selected, handle):
         client = None
+        downloads = []
         try:
             root = Path(config['download_path']).resolve()
             client = self.factory(config['base_url'], config['browser_url'], config['request_delay'], self.stop, config['timeout'])
@@ -239,6 +278,7 @@ class Engine:
             if kind != 'domain':
                 for nid in ids:
                     book = collect_catalog(client, nid, self.update)
+                    self.history.query('INSERT OR REPLACE INTO books VALUES (?,?,?,?)', (nid, book['title'], book['author'], now()))
                     if kind == 'analyze':
                         for item in book['episodes']:
                             item['have'] = self.history.valid(nid, item, root)
@@ -265,6 +305,20 @@ class Engine:
                     self.update(total=len(candidates), done=0, skipped=skipped, title=book['title'])
                     folder = safe_path(root, '%s [%s]' % (safe_name(book['title']), nid))
                     folder.mkdir(parents=True, exist_ok=True)
+                    if config.get('save_cover', True) and book.get('cover_url'):
+                        try:
+                            # Return to the first catalog page: its cover is an ordinary loaded resource.
+                            client.html('/novel/' + nid)
+                            payload = client.cover(book['cover_url'])
+                            ext, mime = image_type(payload)
+                            atomic_write(safe_path(folder, 'cover.' + ext), payload)
+                            for other in ('jpg', 'png', 'webp'):
+                                if other != ext:
+                                    safe_path(folder, 'cover.' + other).unlink(missing_ok=True)
+                        except (Blocked, Pending, Cancelled):
+                            raise
+                        except Exception as exc:
+                            self.update(warnings=True, last_warning='표지 저장 실패: ' + type(exc).__name__)
                     metadata = {k: v for k, v in book.items() if k != 'episodes'}
                     atomic_write(safe_path(folder, 'metadata.json'), json.dumps(metadata, ensure_ascii=False, indent=2).encode('utf-8'))
                     atomic_write(safe_path(folder, 'info.xml'), ('<?xml version="1.0" encoding="utf-8"?><book><title>' + escape(book['title']) + '</title><author>' + escape(book['author']) + '</author></book>').encode('utf-8'))
@@ -279,6 +333,7 @@ class Engine:
                             client.check()
                             atomic_write(path, data)
                             self.history.record(nid, item, 'completed', path, hashlib.sha256(data).hexdigest())
+                            downloads.append(dict(novel_id=nid, title=book['title'], no=item['no'], episode_title=item['title']))
                             self.update(completed=self.snapshot()['completed'] + 1)
                         except Locked as exc:
                             if not self.history.valid(nid, item, root):
@@ -304,14 +359,23 @@ class Engine:
                 client.keep_tab = True
             self.update(status=exc.code, message=str(exc), last_error=str(exc), finished=now())
         except Exception as exc:
-            self.update(status='failed', message='처리 오류: ' + type(exc).__name__, finished=now())
+            self.update(status='failed', message='처리 오류: ' + type(exc).__name__, last_error=type(exc).__name__ + ': ' + str(exc), finished=now())
         finally:
-            if client:
-                client.close()
-            handle.close()
+            try:
+                if client:
+                    client.close()
+            finally:
+                try:
+                    callback = config.get('on_finished')
+                    if callback and kind in ('download', 'domain'):
+                        callback({'state': self.snapshot(), 'source': config.get('source', '수동 다운로드' if selected is not None else '자동 목록 수집'), 'downloads': downloads, 'base_url': client.base if client else config['base_url']})
+                except Exception as exc:
+                    self.update(last_warning='결과 알림/로그 처리 실패: ' + type(exc).__name__)
+                finally:
+                    handle.close()
 
     def export(self, folder, book, root, config, client):
         if config.get('make_epub'):
             self.update(message='다운로드 완료 회차로 EPUB 합본 생성 중')
             rows = [r for r in self.history.rows(book['id']) if valid_record(r, root)]
-            make_epub(folder, book, rows, client.check)
+            make_epub(folder, book, rows, client.check, config)

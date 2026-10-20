@@ -6,6 +6,8 @@ setting = {
     'menu': {'uri': __package__, 'name': '북토끼 소설 다운', 'list': [
         {'uri': 'basic/setting', 'name': '설정'},
         {'uri': 'basic/manual', 'name': '수동 다운로드'},
+        {'uri': 'basic/integration', 'name': '연동 / 알림'},
+        {'uri': 'basic/activity', 'name': '활동 로그'},
         {'uri': 'basic/history', 'name': '다운로드 이력'},
         {'uri': 'log', 'name': '로그'},
     ]},

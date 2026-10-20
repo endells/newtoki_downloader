@@ -10,7 +10,7 @@
 .nt-status{padding:10px 14px;border:1px solid #4776aa;border-left:5px solid #6fb4ff;border-radius:8px;background:#162e4a!important;color:#edf5ff!important;font-size:13px}
 .nt-row{display:flex;gap:10px;align-items:center;flex-wrap:wrap}
 .nt-state{flex:1;min-width:200px;overflow-wrap:anywhere;color:#edf5ff!important}
-.nt input[type=text],.nt input[type=number],.nt textarea{border:1px solid #60799a!important;border-radius:5px;padding:8px;width:100%;background:var(--nt-input)!important;color:#f0f5ff!important;caret-color:#91c6ff}
+.nt input[type=password],.nt input[type=text],.nt input[type=number],.nt textarea{border:1px solid #60799a!important;border-radius:5px;padding:8px;width:100%;background:var(--nt-input)!important;color:#f0f5ff!important;caret-color:#91c6ff}
 .nt input::placeholder,.nt textarea::placeholder{color:#a4b7cf!important;opacity:1}
 .nt input[type=checkbox]{accent-color:#69b3ff;cursor:pointer;width:16px;height:16px;vertical-align:middle}
 .nt input[type=checkbox]:disabled{cursor:not-allowed;opacity:.65}
@@ -52,7 +52,7 @@
 @media(max-width:650px){.nt-grid{grid-template-columns:1fr}.nt-card{padding:12px}.nt{padding:12px 8px}.nt .nt-scroll table td,.nt .nt-scroll table th{padding:7px;font-size:12px}}
 </style>
 <main class="nt">
-<h3>북토끼 소설 다운 <span class="badge">v0.1.2 · 테스트</span></h3>
+<h3>북토끼 소설 다운 <span class="badge">v0.2.0 · 테스트</span></h3>
 <section class="nt-status" aria-label="작업 상태">
  <div class="nt-row"><strong>작업 상태</strong><span id="state" class="nt-state" role="status">확인 중</span><button id="stop" disabled>중지</button></div>
  <div id="counts"></div><progress id="progress" value="0" max="1"></progress><div id="error" class="nt-error"></div><div id="domain-change"></div>
@@ -60,6 +60,10 @@
 <div id="message" class="nt-msg" role="status"></div>
 {% if page == 'setting' %}
 <section class="nt-card">
+<label for="titles">자동 수집 작품 번호 또는 주소 — 한 줄에 하나</label><textarea id="titles" rows="5">{{ config.titles }}</textarea>
+<div class="nt-actions"><input id="add-title" type="text" placeholder="추가할 작품 주소 또는 번호"><button id="register-title">작품 추가</button><button id="refresh-titles">목록 새로고침</button></div>
+<small>목록에 추가해도 즉시 다운로드하지 않습니다. 새로고침은 저장된 목록을 읽습니다.</small>
+<div class="nt-scroll"><table><thead><tr><th>작품</th><th>저장 회차</th><th>관리</th></tr></thead><tbody id="title-list"></tbody></table></div>
 <p class="nt-note">이 사이트는 본문을 브라우저에서 별도로 표시합니다. 먼저 README의 전용 브라우저를 설치하세요. 보안 확인은 그 브라우저에서 직접 처리하며, 로그인·포인트 구매 버튼은 자동으로 누르지 않습니다.</p>
 <div class="nt-grid">
 <div><label for="base_url">구버전 기본 주소</label><input id="base_url" type="text" value="{{ config.base_url }}"></div>
@@ -74,13 +78,12 @@
 <div class="nt-actions"><button id="folder-up">상위 폴더</button><button id="folder-choose" class="primary">이 폴더 선택</button><button id="folder-close">닫기</button></div>
 <div id="folder-list" class="nt-scroll"></div><small>새 하위 폴더는 선택 후 저장 경로 뒤에 직접 붙여 주세요. 다운로드 시 생성합니다.</small>
 </section>
-<label for="titles">자동 수집 작품 번호 또는 주소 — 한 줄에 하나</label><textarea id="titles" rows="5">{{ config.titles }}</textarea>
 <div class="nt-grid">
-{% for key,label in [('episode_digits','파일명 번호 자릿수'),('max_per_title','자동 수집 시 작품당 최대 회차'),('request_delay','페이지 이동 간격 (초)'),('timeout','본문 로딩 대기 (초)'),('basic_interval','자동 수집 간격 (분)')] %}
-<div><label for="{{ key }}">{{ label }}</label><input id="{{ key }}" type="number" value="{{ config[key] }}" step="{% if key == 'request_delay' %}0.5{% else %}1{% endif %}"></div>
+{% for key,label in [('episode_digits','파일명 번호 자릿수'),('max_per_title','자동 수집 시 작품당 최대 회차'),('request_delay','페이지 이동 간격 (초)'),('timeout','본문 로딩 대기 (초)'),('basic_interval','자동 수집 간격 (분)'),('epub_line_height','EPUB 줄 간격 (1.2~3)'),('epub_paragraph_gap','EPUB 문단 간격 (0~2em)')] %}
+<div><label for="{{ key }}">{{ label }}</label><input id="{{ key }}" type="number" value="{{ config[key] }}" step="{% if key in ['request_delay','epub_line_height','epub_paragraph_gap'] %}0.5{% else %}1{% endif %}"></div>
 {% endfor %}
 </div>
-{% for key,label in [('make_epub','다운로드 완료 회차로 EPUB 합본 생성'),('auto_domain','작업 시작 시 안내 페이지의 구버전 주소 확인'),('basic_auto_start','자동 수집 사용')] %}
+{% for key,label in [('save_cover','작품 표지 저장 · EPUB 표지에 삽입'),('make_epub','다운로드 완료 회차로 EPUB 합본 생성'),('auto_domain','작업 시작 시 안내 페이지의 구버전 주소 확인'),('basic_auto_start','자동 수집 사용')] %}
 <label class="nt-check"><input id="{{ key }}" type="checkbox" {% if config[key] %}checked{% endif %}>{{ label }}</label>
 {% endfor %}
 <small>설정 저장만으로 다운로드하지 않습니다. 보안 확인·잠금·오류로 중단되면 예약 수집도 대기하며, 원인 해결 후 수동 작업을 성공시켜야 재개됩니다.</small>
@@ -97,6 +100,21 @@
 <div class="nt-actions"><input id="range-from" class="range" type="number" value="440" min="1" aria-label="시작 회차"><span>~</span><input id="range-to" class="range" type="number" value="440" min="1" aria-label="마지막 회차"><button id="select-range">범위 선택</button><button id="select-none">선택 해제</button><button id="download" class="primary" data-work>선택 회차 다운로드</button><span id="selection"></span></div>
 <div class="nt-scroll"><table><thead><tr><th>선택</th><th>회차</th><th>제목</th><th>상태</th></tr></thead><tbody id="episodes"></tbody></table></div>
 </section>
+{% elif page == 'integration' %}
+<section class="nt-card"><h3>텔레그램 채널 → 자동 수집 목록</h3>
+<label class="nt-check"><input id="tg-enabled" type="checkbox">채널 링크 수신 사용</label>
+<label>수신 간격 (분 · 1~1440)</label><input id="tg-interval" type="number" min="1" max="1440" value="1">
+<label>전용 봇 토큰</label><input id="tg-token" type="password" autocomplete="new-password" placeholder="빈칸은 기존 토큰 유지"><small id="tg-saved"></small>
+<label class="nt-check"><input id="tg-clear" type="checkbox">저장된 토큰 삭제</label>
+<label>채널 ID 또는 @채널사용자명</label><input id="tg-channel" type="text">
+<div class="nt-actions"><button id="tg-save">텔레그램 설정 저장</button><button id="tg-check">연결 확인</button><button id="tg-poll">링크 지금 확인</button></div><p id="tg-state"></p>
+<small>① BotFather에서 전용 봇 생성 → ② 수신할 채널에 봇을 관리자로 추가 → ③ 토큰과 채널 ID 저장 → ④ 새 작품 링크 게시. 일반 메시지·캡션·숨겨진 링크에서 구버전 작품 번호를 추출하며 중복 등록하지 않습니다. 기존 게시물을 일괄 탐색하지 않습니다. 다른 프로그램과 같은 봇을 공유하지 마세요. 수신은 목록만 추가하며 다운로드 예약은 기본 설정에서 별도로 켭니다.</small></section>
+<section class="nt-card"><h3>북토끼 알리미 · Discord</h3><label class="nt-check"><input id="dc-enabled" type="checkbox">알림 사용</label>
+<label>채널 웹훅 URL</label><input id="dc-url" type="password" autocomplete="new-password" placeholder="빈칸은 기존 웹훅 유지"><small id="dc-saved"></small><label class="nt-check"><input id="dc-clear" type="checkbox">웹훅 삭제</label>
+<div class="nt-actions"><button id="dc-save">알림 설정 저장</button><button id="dc-test">테스트 알림</button></div>
+<small>Discord 채널 설정 → 연동 → 웹후크 → 웹후크 URL 복사. 수동·예약 수집의 작품명, 회차, 결과, 오류와 구버전 도메인 변경 주소를 전송합니다. 새 다운로드도 변경도 없는 정상 작업은 알림을 생략합니다.</small></section>
+{% elif page == 'activity' %}
+<section class="nt-card"><div class="nt-actions"><strong>최근 활동 로그 300건</strong><button id="refresh-activity">새로고침</button></div><div class="nt-scroll"><table><thead><tr><th>시각</th><th>수준</th><th>내용</th></tr></thead><tbody id="activity"></tbody></table></div></section>
 {% else %}
 <section class="nt-card"><div class="nt-actions"><strong>최근 이력 200건</strong><button id="refresh-history">새로고침</button></div><div class="nt-scroll"><table><thead><tr><th>작품</th><th>회차</th><th>제목</th><th>상태</th><th>경로 / 오류</th></tr></thead><tbody id="history"></tbody></table></div></section>
 {% endif %}
@@ -120,7 +138,7 @@ function count(){if($('selection'))$('selection').textContent=document.querySele
 function draw(book){analysis=book;$('book-title').textContent=book.title+' · '+book.episodes.length+'개 회차 · '+book.pages.length+'페이지';$('episodes').replaceChildren();
  for(const ep of book.episodes){const row=document.createElement('tr'),td=cell(row,'');const box=document.createElement('input');box.type='checkbox';box.value=ep.id;box.dataset.no=ep.no;box.disabled=ep.locked;box.addEventListener('change',count);td.appendChild(box);cell(row,ep.no);cell(row,ep.title);cell(row,ep.locked?'잠금 표시':ep.have?'저장됨':'접근 여부 미확인');$('episodes').appendChild(row);}count();}
 const labels={idle:'대기',running:'진행 중',completed:'완료',failed:'오류',verification_required:'보안 확인 필요',body_pending:'본문 대기',locked:'잠금 회차',canceled:'중지'};
-async function poll(){try{const d=await post('status'),s=d.state;running=s.status==='running';$('state').textContent=(labels[s.status]||s.status)+' · '+s.message;$('counts').textContent='저장 '+(s.completed||0)+' / 건너뜀 '+(s.skipped||0)+' / 실패 '+(s.failed||0);$('progress').max=s.total||1;$('progress').value=s.done||0;$('error').textContent=s.last_error||'';$('stop').disabled=!running;document.querySelectorAll('[data-work]').forEach(b=>b.disabled=running);
+async function poll(){try{const d=await post('status'),s=d.state;running=s.status==='running';$('state').textContent=(labels[s.status]||s.status)+' · '+s.message;$('counts').textContent='저장 '+(s.completed||0)+' / 건너뜀 '+(s.skipped||0)+' / 실패 '+(s.failed||0);$('progress').max=s.total||1;$('progress').value=s.done||0;$('error').textContent=[s.last_error,s.last_warning].filter(Boolean).join('\n');$('stop').disabled=!running;document.querySelectorAll('[data-work]').forEach(b=>b.disabled=running);
  if(s.domain_change){$('domain-change').textContent='도메인 변경: '+s.domain_change.old+' → '+s.domain_change.new;if($('base_url'))$('base_url').value=s.domain_change.new;}
  if(page==='manual'&&s.analysis){const key=JSON.stringify(s.analysis);if(key!==rendered){draw(s.analysis);rendered=key;}}
  }catch(e){msg(e.message);}setTimeout(poll,2000);}
@@ -146,6 +164,16 @@ bind('select-range',()=>{const a=Number($('range-from').value),b=Number($('range
 bind('select-none',()=>{document.querySelectorAll('#episodes input').forEach(x=>x.checked=false);count();});
 bind('download',async()=>{if(!analysis)throw new Error('먼저 작품을 분석하세요.');const ids=Array.from(document.querySelectorAll('#episodes input:checked')).map(x=>x.value);if(!ids.length)throw new Error('받을 회차를 선택하세요.');msg((await post('download',analysis.id,JSON.stringify(ids))).msg);});
 async function history(){const d=await post('history');$('history').replaceChildren();for(const r of d.rows){const tr=document.createElement('tr');[r.novel_id,r.no,r.title,labels[r.status]||r.status,r.error||r.path].forEach(t=>cell(tr,t));$('history').appendChild(tr);}}
+async function titles(){const d=await post('titles');$('title-list').replaceChildren();$('titles').value=d.rows.map(x=>x.id).join('\n');for(const x of d.rows){const tr=document.createElement('tr');cell(tr,x.title+' ['+x.id+']');cell(tr,x.completed);const td=cell(tr,'');for(const [label,command] of [['지금 받기','run_title'],['목록에서 제외','remove_auto']]){const b=document.createElement('button');b.textContent=label;b.onclick=async()=>{try{msg((await post(command,x.id)).msg);if(command==='remove_auto')await titles();}catch(e){msg(e.message);}};td.appendChild(b);}$('title-list').appendChild(tr);}}
+bind('register-title',async()=>{msg((await post('add_auto',$('add-title').value)).msg);await titles();});bind('refresh-titles',titles);if(page==='setting')titles().catch(e=>msg(e.message));
+function tg(c){$('tg-enabled').checked=c.enabled;$('tg-channel').value=c.channel;$('tg-interval').value=c.interval_minutes;$('tg-saved').textContent=c.token_saved?'토큰 저장됨':'저장된 토큰 없음';}
+function dc(c){$('dc-enabled').checked=c.enabled;$('dc-saved').textContent=c.url_saved?'웹훅 저장됨':'저장된 웹훅 없음';}
+if(page==='integration')post('integration_settings').then(d=>{tg(d.telegram);dc(d.discord);$('tg-state').textContent=d.state;}).catch(e=>msg(e.message));
+bind('tg-save',async()=>{const d=await post('telegram_save',JSON.stringify({enabled:$('tg-enabled').checked,interval_minutes:$('tg-interval').value,token:$('tg-token').value,channel:$('tg-channel').value,clear_token:$('tg-clear').checked}));tg(d.config);$('tg-token').value='';$('tg-clear').checked=false;msg(d.msg);});
+bind('tg-check',async()=>msg((await post('telegram_check')).msg));bind('tg-poll',async()=>{$('tg-state').textContent=(await post('telegram_poll')).msg;});
+bind('dc-save',async()=>{const d=await post('discord_save',JSON.stringify({enabled:$('dc-enabled').checked,url:$('dc-url').value,clear_url:$('dc-clear').checked}));dc(d.config);$('dc-url').value='';$('dc-clear').checked=false;msg(d.msg);});bind('dc-test',async()=>msg((await post('discord_test')).msg));
+async function activity(){const d=await post('activity');$('activity').replaceChildren();for(const x of d.rows){const tr=document.createElement('tr');[x.time,x.level,x.message].forEach(v=>cell(tr,v));$('activity').appendChild(tr);}}
+bind('refresh-activity',activity);if(page==='activity')activity().catch(e=>msg(e.message));
 bind('refresh-history',history);if(page==='history')history().catch(e=>msg(e.message));poll();
 })();
 </script>
