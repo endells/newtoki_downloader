@@ -184,5 +184,12 @@ class FFTests(unittest.TestCase):
             self.assertEqual(self.send('resume')['ret'],'success')
             resume.assert_called_once()
 
+    def test_batch_rest_defaults_and_validation(self):
+        conf=self.module.config()
+        self.assertEqual((conf['batch_size'],conf['batch_pause']),(10,60))
+        for key,value in [('batch_size','0'),('batch_size','101'),('batch_pause','9'),('batch_pause','3601')]:
+            with self.assertRaises(Exception):
+                self.module.validate(dict(self.settings.data,**{key:value}))
+
 
 if __name__=='__main__':unittest.main()

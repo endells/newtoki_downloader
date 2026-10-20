@@ -303,7 +303,22 @@ class Engine:
                 self.update(message='일시적 본문 로딩 지연 · 2초 후 같은 회차를 한 번 다시 확인합니다.')
                 if self.stop.wait(2):
                     client.check()
-                resumed = False
+                # After human confirmation keep reading the same tab, even if loading is slow.
+                # Navigating again here would discard the page the user just confirmed.
+
+    def batch_rest(self, seconds):
+        deadline = time.monotonic() + seconds
+        self.update(phase='batch_rest', message='연속 수집 휴식 · %s초 동안 새 페이지를 요청하지 않습니다.' % seconds)
+        try:
+            while True:
+                self.stop_check()
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    return
+                self.update(rest_remaining=int(remaining) + 1)
+                self.stop.wait(min(1, remaining))
+        finally:
+            self.update(phase='', rest_remaining=0)
 
     def start(self, kind, ids, config, selected=None):
         import fcntl
@@ -412,10 +427,16 @@ class Engine:
                             message='기존 파일 %s 완료 · 변경 예정 %s · 파일 변경 %s · 폴더 변경 %s · 충돌 %s · 제외 %s' % ('정리' if report['applied'] else '검사', report['planned'], report['files_renamed'], report['folders_renamed'], report['conflicts'], report['skipped']))
                 return
             client = self.factory(config['base_url'], config['browser_url'], config['request_delay'], self.stop, config['timeout'])
+            batch_count = 0
+            batch_size = int(config.get('batch_size', 10))
+            batch_pause = int(config.get('batch_pause', 60))
             if kind == 'domain' or config.get('auto_domain'):
                 self.resolve(client, ids[0], config)
             if kind != 'domain':
                 for nid in ids:
+                    if kind == 'download' and batch_count >= batch_size:
+                        self.batch_rest(batch_pause)
+                        batch_count = 0
                     book = collect_catalog(client, nid, self.update)
                     self.history.cache_catalog(book)
                     try:
@@ -485,6 +506,9 @@ class Engine:
                     atomic_write(safe_path(folder, 'info.xml'), ('<?xml version="1.0" encoding="utf-8"?><book><title>' + escape(book['title']) + '</title><author>' + escape(book['author']) + '</author></book>').encode('utf-8'))
                     for i, item in enumerate(candidates):
                         client.check()
+                        if batch_count >= batch_size:
+                            self.batch_rest(batch_pause)
+                            batch_count = 0
                         self.update(message='받는 중: %s / %s회차 · 작업 %s/%s' % (book['title'], item['no'], i + 1, len(candidates)), episode_id=item['id'], episode_no=item['no'], position=i + 1)
                         try:
                             text = self.read_body(client, nid, item, lambda: self.export(folder, book, root, config, client))
@@ -500,6 +524,7 @@ class Engine:
                             self.history.record(nid, item, 'completed', path, hashlib.sha256(data).hexdigest())
                             downloads.append(dict(novel_id=nid, title=book['title'], no=item['no'], episode_title=item['title']))
                             self.update(completed=self.snapshot()['completed'] + 1)
+                            batch_count += 1
                         except Locked as exc:
                             if not self.history.valid(nid, item, root):
                                 self.history.record(nid, item, 'locked', error=str(exc))

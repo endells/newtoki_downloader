@@ -90,3 +90,39 @@ class PauseResume(unittest.TestCase):
         c.evaluate=Mock(side_effect=[fixtures.BASE+'/novel/123/1001','<title>Just a moment...</title>Verify you are human'])
         with self.assertRaises(Blocked):c.continue_body('123',{'id':'1001','no':1})
         c.html.assert_not_called()
+
+    def test_25_episodes_rest_after_each_10_not_after_final_episode(self):
+        class C(fixtures.FakeClient):
+            def html(self,path):return fixtures.catalog(range(1,26))
+        c=C(fixtures.BASE);self.engine.factory=lambda *args:c
+        self.config.update(batch_size=10,batch_pause=60)
+        with patch.object(self.engine,'batch_rest') as rest:
+            counts=[];rest.side_effect=lambda seconds:counts.append((seconds,len(c.calls)))
+            state=self.run_job([str(1000+n) for n in range(1,26)])
+        self.assertEqual(state['status'],'completed')
+        self.assertEqual(state['completed'],25)
+        self.assertEqual(counts,[(60,10),(60,20)])
+
+    def test_cancel_during_rest_sends_no_more_requests(self):
+        c=fixtures.FakeClient(fixtures.BASE);self.engine.factory=lambda *args:c
+        self.config.update(batch_size=1,batch_pause=60)
+        self.engine.start('download',['123'],self.config,['1001','1002'])
+        self.addCleanup(lambda:(self.engine.cancel(),self.engine.thread.join(2)))
+        self.wait(lambda:self.engine.snapshot().get('phase')=='batch_rest')
+        self.assertEqual(c.calls,['1001'])
+        self.engine.cancel();self.engine.thread.join(2)
+        self.assertFalse(self.engine.thread.is_alive())
+        self.assertEqual(self.engine.snapshot()['status'],'canceled')
+        self.assertEqual(c.calls,['1001'])
+        self.assertEqual(self.engine.snapshot()['completed'],1)
+
+    def test_pending_after_human_resume_never_navigates_again(self):
+        c=self.challenge_client()
+        c.continue_body=Mock(side_effect=[Pending('확인한 본문 로딩 중'),fixtures.TEXT])
+        self.engine.start('download',['123'],self.config,['1002'])
+        self.addCleanup(lambda:(self.engine.cancel(),self.engine.thread.join(2)))
+        self.wait(lambda:self.engine.snapshot()['status']=='verification_waiting')
+        self.engine.resume();self.engine.thread.join(3)
+        self.assertEqual(self.engine.snapshot()['status'],'completed')
+        self.assertEqual(c.normal,['1002'])
+        self.assertEqual(c.continue_body.call_count,2)

@@ -22,6 +22,7 @@ class ModuleBasic(PluginModuleBase):
     db_default = {
         'announcement_url': DEFAULT_ANNOUNCEMENT, 'base_url': 'https://newtoki1.org', 'browser_url': 'http://newtoki-browser:9223',
         'download_path': '', 'titles': '', 'request_delay': '3', 'timeout': '30',
+        'batch_size': '10', 'batch_pause': '60',
         'episode_digits': '4', 'max_per_title': '10', 'make_epub': 'True',
         'save_cover': 'True', 'epub_line_height': '1.8', 'epub_paragraph_gap': '0.55',
         'auto_domain': 'True', 'basic_auto_start': 'False', 'basic_interval': '180',
@@ -71,7 +72,9 @@ class ModuleBasic(PluginModuleBase):
             raise SiteError('저장 폴더는 FF 컨테이너 안의 절대 경로여야 합니다.')
         conf['download_path'] = path
         conf['titles'] = '\n'.join(title_ids(conf['titles']))
-        for key, lo, hi in [('episode_digits', 1, 10), ('max_per_title', 1, 1000), ('timeout', 10, 90), ('basic_interval', 10, 10080)]:
+        conf.setdefault('batch_size', '10')
+        conf.setdefault('batch_pause', '60')
+        for key, lo, hi in [('episode_digits', 1, 10), ('max_per_title', 1, 1000), ('timeout', 10, 90), ('basic_interval', 10, 10080), ('batch_size', 1, 100), ('batch_pause', 10, 3600)]:
             conf[key] = int(conf[key])
             if not lo <= conf[key] <= hi:
                 raise SiteError('%s 범위: %s~%s' % (key, lo, hi))

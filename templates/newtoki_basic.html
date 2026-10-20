@@ -52,7 +52,7 @@
 @media(max-width:650px){.nt-grid{grid-template-columns:1fr}.nt-card{padding:12px}.nt{padding:12px 8px}.nt .nt-scroll table td,.nt .nt-scroll table th{padding:7px;font-size:12px}}
 </style>
 <main class="nt">
-<h3>북토끼 소설 다운 <span class="badge">v0.2.10 · 테스트</span></h3>
+<h3>북토끼 소설 다운 <span class="badge">v0.2.11 · 테스트</span></h3>
 <section class="nt-status" aria-label="작업 상태">
  <div class="nt-row"><strong>작업 상태</strong><span id="state" class="nt-state" role="status">확인 중</span><button id="resume" class="primary" hidden>확인 후 계속</button><button id="stop" disabled>중지</button></div>
  <div id="verification-help" class="nt-note" hidden></div><div id="counts"></div><progress id="progress" value="0" max="1"></progress><div id="error" class="nt-error"></div><div id="domain-change"></div><div id="domain-attempts" class="nt-msg"></div>
@@ -74,13 +74,14 @@
 <div id="folder-list" class="nt-scroll"></div><small>새 하위 폴더는 선택 후 저장 경로 뒤에 직접 붙여 주세요. 다운로드 시 생성합니다.</small>
 </section>
 <div class="nt-grid">
-{% for key,label in [('episode_digits','파일명 번호 자릿수'),('max_per_title','자동 수집 시 작품당 최대 회차'),('request_delay','페이지 이동 간격 (초)'),('timeout','본문 로딩 대기 (초)'),('basic_interval','자동 수집 간격 (분)'),('epub_line_height','EPUB 줄 간격 (1.2~3)'),('epub_paragraph_gap','EPUB 문단 간격 (0~2em)')] %}
+{% for key,label in [('episode_digits','파일명 번호 자릿수'),('max_per_title','자동 수집 시 작품당 최대 회차'),('request_delay','페이지 이동 간격 (초)'),('batch_size','연속 수집 후 쉬는 기준 (편 · 1~100)'),('batch_pause','연속 수집 휴식 (초 · 10~3600)'),('timeout','본문 로딩 대기 (초)'),('basic_interval','자동 수집 간격 (분)'),('epub_line_height','EPUB 줄 간격 (1.2~3)'),('epub_paragraph_gap','EPUB 문단 간격 (0~2em)')] %}
 <div><label for="{{ key }}">{{ label }}</label><input id="{{ key }}" type="number" value="{{ config[key] }}" step="{% if key in ['request_delay','epub_line_height','epub_paragraph_gap'] %}0.5{% else %}1{% endif %}"></div>
 {% endfor %}
 </div>
 {% for key,label in [('save_cover','작품 표지 저장 · EPUB 표지에 삽입'),('make_epub','다운로드 완료 회차로 EPUB 합본 생성'),('basic_auto_start','자동 수집 사용')] %}
 <label class="nt-check"><input id="{{ key }}" type="checkbox" {% if config[key] %}checked{% endif %}>{{ label }}</label>
 {% endfor %}
+<small>기본 10편마다 60초 쉽니다. 수동·자동 다운로드 모두 적용되며 휴식 중에는 새 페이지를 요청하지 않습니다. 보안 확인이 뜨면 사용자가 확인할 때까지 대기합니다. 사이트 제한 해제를 보장하는 기능은 아닙니다.</small>
 <small>설정 저장만으로 다운로드하지 않습니다. 보안 확인·잠금·오류로 중단되면 예약 수집도 대기하며, 원인 해결 후 수동 작업을 성공시켜야 재개됩니다.</small>
 <div class="nt-actions"><button id="save" class="primary">설정 저장</button><button id="run" data-work>지금 받기</button></div>
 
