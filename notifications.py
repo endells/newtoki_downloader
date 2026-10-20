@@ -59,6 +59,33 @@ def webhook_url(value):
     return value
 
 
+def episode_ranges(numbers):
+    values = sorted(set(int(n) for n in numbers))
+    if not values:
+        return []
+    result = []
+    first = last = values[0]
+    for value in values[1:]:
+        if value == last + 1:
+            last = value
+        else:
+            result.append('%04d' % first if first == last else '%04d-%04d' % (first, last))
+            first = last = value
+    result.append('%04d' % first if first == last else '%04d-%04d' % (first, last))
+    return result
+
+
+def range_lines(numbers):
+    current = ''
+    for token in episode_ranges(numbers):
+        if current and len(current) + len(token) + 2 > 800:
+            yield '회차: ' + current
+            current = ''
+        current += (', ' if current else '') + token
+    if current:
+        yield '회차: ' + current
+
+
 def summary_messages(report):
     state = report['state']
     source = report.get('source', '수동 다운로드')
@@ -69,11 +96,13 @@ def summary_messages(report):
     grouped = {}
     for item in report.get('downloads', []):
         group = grouped.setdefault(item['novel_id'], {'title': item['title'], 'episodes': []})
-        group['episodes'].append('%s. %s' % (item['no'], item['episode_title']))
+        group['episodes'].append(int(item['no']))
     for nid, group in grouped.items():
-        lines += ['', '%s — %s회 저장' % (group['title'][:180], len(group['episodes'])),
+        lines += ['', '%s — %s회 저장' % (group['title'][:180], len(set(group['episodes']))),
                   report.get('base_url', 'https://newtoki1.org') + '/novel/' + nid]
-        lines += ['  ' + name[:240] for name in group['episodes']]
+        lines += list(range_lines(group['episodes']))
+    if state.get('history_imported'):
+        lines += ['파일명 회차로 이력 반영: %s회' % state['history_imported']]
     if state.get('domain_change'):
         change = state['domain_change']
         lines += ['', '도메인 변경: ' + change['old'] + ' → ' + change['new']]
@@ -155,7 +184,7 @@ class DiscordNotifier:
         if not conf['enabled']:
             return False
         state = report['state']
-        if not state.get('completed') and not state.get('failed') and state['status'] == 'completed' and not state.get('warnings') and not state.get('domain_change'):
+        if not state.get('completed') and not state.get('failed') and state['status'] == 'completed' and not state.get('warnings') and not state.get('domain_change') and not state.get('history_imported'):
             return False
         for message in summary_messages(report):
             self.sender(conf['url'], message)

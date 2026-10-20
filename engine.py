@@ -100,6 +100,7 @@ class History:
         self.path = str(path)
         Path(path).parent.mkdir(parents=True, exist_ok=True)
         self.query('CREATE TABLE IF NOT EXISTS entries (novel_id TEXT, episode_id TEXT, no INTEGER, title TEXT, status TEXT, path TEXT, digest TEXT, error TEXT, updated TEXT, PRIMARY KEY(novel_id,episode_id))')
+        self.query('CREATE TABLE IF NOT EXISTS catalogs (novel_id TEXT PRIMARY KEY, data TEXT, updated TEXT)')
 
     def query(self, sql, args=()):
         db = sqlite3.connect(self.path, timeout=15)
@@ -114,6 +115,14 @@ class History:
         if nid:
             return self.query('SELECT * FROM entries WHERE novel_id=? ORDER BY no,episode_id', (nid,))
         return self.query('SELECT * FROM entries ORDER BY updated DESC LIMIT 200')
+
+    def cache_catalog(self, book):
+        data = {k: v for k, v in book.items() if k != 'episodes'}
+        data['episodes'] = [{k: e.get(k) for k in ('id', 'no', 'title', 'locked')} for e in book['episodes']]
+        self.query('INSERT OR REPLACE INTO catalogs VALUES (?,?,?)', (book['id'], json.dumps(data, ensure_ascii=False), now()))
+
+    def catalogs(self):
+        return [json.loads(r['data']) for r in self.query('SELECT data FROM catalogs')]
 
     def record(self, nid, item, status, path='', digest='', error=''):
         self.query('INSERT OR REPLACE INTO entries VALUES (?,?,?,?,?,?,?,?,?)',
@@ -154,8 +163,16 @@ def make_epub(folder, book, records, check=lambda: None, config=None):
         for index, row in enumerate(records):
             check()
             title = '%s. %s' % (row['no'], row['title'])
-            text = Path(row['path']).read_text(encoding='utf-8')
-            if '\n\n' in text:
+            raw = Path(row['path']).read_bytes()
+            if raw.startswith((b'\xff\xfe', b'\xfe\xff')):
+                text = raw.decode('utf-16')
+            else:
+                try:
+                    text = raw.decode('utf-8-sig')
+                except UnicodeDecodeError:
+                    text = raw.decode('cp949', errors='replace')
+            text = text.replace('\r\n', '\n').replace('\r', '\n')
+            if '\n\n' in text and text.split('\n\n', 1)[0].strip() == title:
                 text = text.split('\n\n', 1)[1]
             name = 'chapter-%s.xhtml' % row['episode_id']
             paragraphs = ''.join('<p>' + escape(p).replace('\n', '<br/>') + '</p>' for p in text.split('\n\n') if p.strip())
@@ -330,6 +347,7 @@ class Engine:
                 except ImportError:
                     from file_manager import manage_files
                 report = manage_files(root, self.history, kind == 'files_apply', self.stop_check, self.update)
+                self.update(history_imported=report['history_imported'], history_missing=report['history_missing'])
                 count = report['files_renamed'] + report['folders_renamed'] + report['history_repaired']
                 self.update(file_report=report, completed=count, status='completed', finished=now(),
                             message='기존 파일 %s 완료 · 변경 예정 %s · 파일 변경 %s · 폴더 변경 %s · 충돌 %s · 제외 %s' % ('정리' if report['applied'] else '검사', report['planned'], report['files_renamed'], report['folders_renamed'], report['conflicts'], report['skipped']))
@@ -340,6 +358,14 @@ class Engine:
             if kind != 'domain':
                 for nid in ids:
                     book = collect_catalog(client, nid, self.update)
+                    self.history.cache_catalog(book)
+                    try:
+                        from .reconcile import reconcile_book
+                    except ImportError:
+                        from reconcile import reconcile_book
+                    local = reconcile_book(root, self.history, book, client.check, self.update)
+                    self.update(history_imported=self.snapshot().get('history_imported', 0) + local['imported'] + local['refreshed'],
+                                history_missing=self.snapshot().get('history_missing', 0) + local['missing'])
                     self.history.query('INSERT OR REPLACE INTO books VALUES (?,?,?,?)', (nid, book['title'], book['author'], now()))
                     if kind == 'analyze':
                         for item in book['episodes']:
@@ -369,8 +395,15 @@ class Engine:
                     if folder.exists() and any(folder.iterdir()):
                         try:
                             existing = json.loads(safe_path(folder, 'metadata.json').read_text(encoding='utf-8'))
+                        except FileNotFoundError:
+                            # An exact work-title folder may contain externally supplied TXT files.
+                            prefix = str(folder) + os.sep
+                            claims = self.history.query('SELECT novel_id FROM entries WHERE novel_id<>? AND substr(path,1,?)=? LIMIT 1', (nid, len(prefix), prefix))
+                            if claims:
+                                raise SiteError('같은 이름의 폴더가 다른 작품 이력에 사용되고 있습니다.')
+                            existing = {'id': nid}
                         except (OSError, ValueError):
-                            raise SiteError('같은 이름의 기존 폴더를 확인할 수 없습니다. 기존 파일 관리에서 먼저 확인하세요.') from None
+                            raise SiteError('같은 이름의 기존 폴더 정보를 읽지 못했습니다.') from None
                         if str(existing.get('id')) != nid:
                             raise SiteError('같은 제목의 다른 작품 폴더가 있습니다. 저장 경로를 구분하세요.')
                     folder.mkdir(parents=True, exist_ok=True)

@@ -51,11 +51,11 @@ class FileManagerTests(unittest.TestCase):
         self.assertEqual((plain/'marker').read_bytes(),b'keep')
 
     def test_corrupt_missing_and_untracked_files_not_renamed(self):
-        self.path.write_bytes(b'changed')
+        self.path.write_bytes(b'')
         unknown=self.folder/'0002_다른 화 [1002].txt';unknown.write_bytes(b'unknown')
         report=manage_files(self.root,self.history,True)
         new=self.root/'작품'
-        self.assertEqual((new/self.path.name).read_bytes(),b'changed')
+        self.assertEqual((new/self.path.name).read_bytes(),b'')
         self.assertTrue((new/unknown.name).exists())
         self.assertEqual(report['files_renamed'],0)
         self.assertEqual(report['skipped'],1)
@@ -63,15 +63,16 @@ class FileManagerTests(unittest.TestCase):
     def test_recover_interrupted_folder_rename_then_file_rename(self):
         plain=self.root/'작품';self.folder.rename(plain)
         before=manage_files(self.root,self.history)
-        self.assertEqual(before['planned'],2)
+        self.assertEqual(before['planned'],1)
+        self.assertEqual(before['history_imported'],1)
         report=manage_files(self.root,self.history,True)
-        self.assertEqual(report['history_repaired'],1)
+        self.assertEqual(report['history_repaired']+report['history_imported'],0)
         self.assertTrue(self.history.valid('123',self.item,self.root))
         row=self.history.rows('123')[0]
         # Simulate old DB path after a previous process already renamed the file.
         self.history.query('UPDATE entries SET path=?',(str(plain/self.path.name),))
         report=manage_files(self.root,self.history,True)
-        self.assertEqual(report['history_repaired'],1)
+        self.assertEqual(report['history_repaired']+report['history_imported'],1)
         self.assertTrue(self.history.valid('123',self.item,self.root))
 
     def test_db_failure_rolls_back_folder_or_file_without_loss(self):

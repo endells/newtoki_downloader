@@ -24,11 +24,13 @@ class ManualHistory(unittest.TestCase):
         self.run_job(['1001'])
         self.assertTrue(self.analyze()['1001'])
         row=self.engine.history.rows('123')[0];path=Path(row['path'])
-        for damaged in (b'',b'changed content'):
+        for damaged in (b'',):
             path.write_bytes(damaged)
             self.assertFalse(self.analyze()['1001'])
             self.assertEqual(self.run_job(['1001'])['completed'],1)
             self.assertTrue(self.engine.snapshot()['analysis']['episodes'][0]['have'])
+        path.write_bytes(b'externally replaced content')
+        self.assertTrue(self.analyze()['1001'])
         path.unlink()
         self.assertFalse(self.analyze()['1001'])
         self.assertEqual(self.run_job(['1001'])['completed'],1)

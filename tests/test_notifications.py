@@ -29,7 +29,8 @@ class NotificationTests(unittest.TestCase):
         self.assertEqual(self.notifier.path.stat().st_mode & 0o777, 0o600)
         self.notifier.save({'enabled': True, 'url': ''})
         self.assertTrue(self.notifier.notify(self.report))
-        self.assertIn('1. 시작', self.sent[0])
+        self.assertIn('회차: 0001', self.sent[0])
+        self.assertNotIn('시작',self.sent[0])
         self.assertIn('자동 수집', self.sent[0])
         self.notifier.test()
         self.assertIn('테스트', self.sent[-1])
@@ -45,12 +46,18 @@ class NotificationTests(unittest.TestCase):
         self.report['state']['status'] = 'canceled'
         self.assertTrue(self.notifier.notify(self.report))
 
-    def test_long_summary_keeps_all_episode_names_within_limit(self):
-        self.report['downloads'] = [{'novel_id': '123', 'title': '시험', 'no': i, 'episode_title': '회차-%s 😀' % i} for i in range(1000)]
-        messages = summary_messages(self.report)
-        self.assertGreater(len(messages), 1)
-        self.assertTrue(all(len(s.encode('utf-16-le')) // 2 <= 2000 for s in messages))
-        self.assertIn('회차-999', '\n'.join(messages))
+    def test_compact_ranges_and_sparse_summary_within_limit(self):
+        from newtoki_downloader.notifications import episode_ranges
+        self.assertEqual(episode_ranges([1,2,3,7,10,11,3]),['0001-0003','0007','0010-0011'])
+        self.report['downloads'] = [{'novel_id':'123','title':'작품','no':i,'episode_title':'title-do-not-send'} for i in range(1,101)]
+        text='\n'.join(summary_messages(self.report))
+        self.assertIn('회차: 0001-0100',text)
+        self.assertNotIn('title-do-not-send',text)
+        self.report['downloads'] = [{'novel_id':'123','title':'작품','no':i} for i in range(1,3000,2)]
+        messages=summary_messages(self.report)
+        self.assertGreater(len(messages),1)
+        self.assertTrue(all(len(s.encode('utf-16-le'))//2<=2000 for s in messages))
+        self.assertIn('2999','\n'.join(messages))
 
     def test_reject_non_discord_and_redact_network_error(self):
         for url in ['http://discord.com/api/webhooks/1/x', 'https://discord.com.evil.test/api/webhooks/1/x', 'https://127.0.0.1/x']:

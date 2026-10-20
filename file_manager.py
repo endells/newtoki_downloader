@@ -46,7 +46,15 @@ def manage_files(root, history, apply=False, check=lambda: None, update=lambda *
             report['truncated'] = True
         update(message=message + ': ' + str(source))
 
-    rows = history.query("SELECT * FROM entries WHERE status='completed' ORDER BY novel_id,no")
+    try:
+        from .reconcile import reconcile_library
+    except ImportError:
+        from reconcile import reconcile_library
+    local = reconcile_library(root, history, check, update)
+    report.update(history_imported=local['imported'] + local['refreshed'], history_missing=local['missing'],
+                  matched=local['matched'], zero=local['zero'], unknown=local['unknown'], books=local['books'], needs_analysis=local['needs_analysis'])
+
+    rows = history.query("SELECT * FROM entries WHERE status IN ('completed','missing') ORDER BY novel_id,no")
     folders = {}
     for row in rows:
         check()
@@ -89,7 +97,7 @@ def manage_files(root, history, apply=False, check=lambda: None, update=lambda *
         event('폴더', old, new, 'renamed' if apply else 'planned', '폴더 번호 제거 완료' if apply else '폴더 번호 제거 예정')
 
     if apply:
-        rows = history.query("SELECT * FROM entries WHERE status='completed' ORDER BY novel_id,no")
+        rows = history.query("SELECT * FROM entries WHERE status IN ('completed','missing') ORDER BY novel_id,no")
     for row in rows:
         check()
         old = Path(row['path'])
