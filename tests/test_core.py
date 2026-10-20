@@ -136,7 +136,7 @@ class EngineTests(unittest.TestCase):
             self.assertEqual(z.infolist()[0].compress_type,0)
             for name in z.namelist():
                 if name.endswith(('.xml','.opf','.xhtml')):ET.fromstring(z.read(name))
-        self.assertEqual(self.run_job(['1001'])['completed'],1)
+        self.assertEqual(self.run_job(['1001'])['completed'],0)
 
     def test_auto_limit_and_history_skip(self):
         self.assertEqual(self.run_job()['completed'],1)

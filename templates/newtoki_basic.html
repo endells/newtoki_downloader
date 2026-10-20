@@ -52,7 +52,7 @@
 @media(max-width:650px){.nt-grid{grid-template-columns:1fr}.nt-card{padding:12px}.nt{padding:12px 8px}.nt .nt-scroll table td,.nt .nt-scroll table th{padding:7px;font-size:12px}}
 </style>
 <main class="nt">
-<h3>북토끼 소설 다운 <span class="badge">v0.2.3 · 테스트</span></h3>
+<h3>북토끼 소설 다운 <span class="badge">v0.2.4 · 테스트</span></h3>
 <section class="nt-status" aria-label="작업 상태">
  <div class="nt-row"><strong>작업 상태</strong><span id="state" class="nt-state" role="status">확인 중</span><button id="stop" disabled>중지</button></div>
  <div id="counts"></div><progress id="progress" value="0" max="1"></progress><div id="error" class="nt-error"></div><div id="domain-change"></div><div id="domain-attempts" class="nt-msg"></div>
@@ -97,9 +97,9 @@
 <section class="nt-card">
 <label for="novel">작품 URL 또는 번호</label><input id="novel" type="text" value="https://newtoki1.org/novel/58035">
 <div class="nt-actions"><button id="analyze" class="primary" data-work>작품 분석</button><button id="add-auto">자동 수집에 추가</button></div>
-<p class="nt-note">처음에는 회차 1개만 선택해 테스트하세요. 수동 다운로드는 선택 회차 전체를 처리하며 자동 수집 개수 제한을 적용하지 않습니다. 이미 저장된 회차도 다시 받아 같은 이름의 파일을 갱신합니다. 잠금·보안 확인이 나오면 중단합니다.</p>
+<p class="nt-note">작품 분석 시 정상 파일이 확인된 회차는 ‘저장됨’으로 표시하고 선택에서 제외합니다. 미저장 회차만 기본 선택되며 범위·전체 선택도 같은 기준을 적용합니다. 파일이 없거나 0바이트·내용 손상이 확인되면 다시 받을 수 있습니다. 수동 다운로드에는 자동 수집 개수 제한을 적용하지 않습니다.</p>
 <strong id="book-title">작품을 분석하면 전체 페이지의 회차가 표시됩니다.</strong>
-<div class="nt-actions"><input id="range-from" class="range" type="number" value="440" min="1" aria-label="시작 회차"><span>~</span><input id="range-to" class="range" type="number" value="440" min="1" aria-label="마지막 회차"><button id="select-range">범위 선택</button><button id="select-none">선택 해제</button><button id="download" class="primary" data-work>선택 회차 다운로드</button><span id="selection"></span></div>
+<div class="nt-actions"><input id="range-from" class="range" type="number" value="440" min="1" aria-label="시작 회차"><span>~</span><input id="range-to" class="range" type="number" value="440" min="1" aria-label="마지막 회차"><button id="select-range">범위 선택</button><button id="select-missing">미저장 전체 선택</button><button id="select-none">선택 해제</button><button id="download" class="primary" data-work>선택 회차 다운로드</button><span id="selection"></span></div>
 <div class="nt-scroll"><table><thead><tr><th>선택</th><th>회차</th><th>제목</th><th>상태</th></tr></thead><tbody id="episodes"></tbody></table></div>
 </section>
 {% elif page == 'integration' %}
@@ -136,14 +136,15 @@ async function post(command,arg1='',arg2=''){
 }
 function bind(id,fn){if($(id))$(id).addEventListener('click',()=>Promise.resolve().then(fn).catch(e=>msg(e.message)));}
 function cell(row,text){const td=document.createElement('td');td.textContent=text;row.appendChild(td);return td;}
-function count(){if($('selection'))$('selection').textContent=document.querySelectorAll('#episodes input:checked').length+'개 선택';}
-function draw(book){analysis=book;$('book-title').textContent=book.title+' · '+book.episodes.length+'개 회차 · '+book.pages.length+'페이지';$('episodes').replaceChildren();
- for(const ep of book.episodes){const row=document.createElement('tr'),td=cell(row,'');const box=document.createElement('input');box.type='checkbox';box.value=ep.id;box.dataset.no=ep.no;box.disabled=ep.locked;box.addEventListener('change',count);td.appendChild(box);cell(row,ep.no);cell(row,ep.title);cell(row,ep.locked?'잠금 표시':ep.have?'저장됨':'접근 여부 미확인');$('episodes').appendChild(row);}count();}
+function count(){const n=document.querySelectorAll('#episodes input:checked:not(:disabled)').length;if($('selection'))$('selection').textContent=n+'개 선택';if($('download'))$('download').disabled=running||!analysis||!n;}
+function draw(book){analysis=book;$('book-title').textContent=book.title+' · '+book.episodes.length+'개 회차 · '+book.pages.length+'페이지 · 저장됨 '+book.episodes.filter(e=>e.have).length+' / 미저장 '+book.episodes.filter(e=>!e.have&&!e.locked).length+' / 잠금 '+book.episodes.filter(e=>!e.have&&e.locked).length;$('episodes').replaceChildren();
+ for(const ep of book.episodes){const row=document.createElement('tr'),td=cell(row,'');const box=document.createElement('input');box.type='checkbox';box.value=ep.id;box.dataset.no=ep.no;box.disabled=ep.locked||ep.have;box.checked=!box.disabled;box.addEventListener('change',count);td.appendChild(box);cell(row,ep.no);cell(row,ep.title);const status=cell(row,ep.have?'저장됨':ep.locked?'잠금 표시':'미저장');if(ep.have)status.style.setProperty('color','#9fe0bf','important');$('episodes').appendChild(row);}count();}
 const labels={idle:'대기',running:'진행 중',completed:'완료',failed:'오류',verification_required:'보안 확인 필요',body_pending:'본문 대기',locked:'잠금 회차',canceled:'중지'};
 async function poll(){try{const d=await post('status'),s=d.state;running=s.status==='running';$('state').textContent=(labels[s.status]||s.status)+' · '+s.message;$('counts').textContent='저장 '+(s.completed||0)+' / 건너뜀 '+(s.skipped||0)+' / 실패 '+(s.failed||0);$('progress').max=s.total||1;$('progress').value=s.done||0;$('error').textContent=[s.last_error,s.last_warning].filter(Boolean).join('\n');$('stop').disabled=!running;document.querySelectorAll('[data-work]').forEach(b=>b.disabled=running);
  $('domain-attempts').textContent=(s.domain_attempts||[]).map(a=>a.kind+' · '+a.url+' · '+a.message).join('\n');
  if(s.domain_change){$('domain-change').textContent='도메인 변경: '+s.domain_change.old+' → '+s.domain_change.new;if($('base_url'))$('base_url').value=s.domain_change.new;}
  if(page==='manual'&&s.analysis){const key=JSON.stringify(s.analysis);if(key!==rendered){draw(s.analysis);rendered=key;}}
+ if(page==='manual')count();
  }catch(e){msg(e.message);}setTimeout(poll,2000);}
 bind('stop',async()=>msg((await post('stop')).msg));
 async function browsePath(path=''){
@@ -162,10 +163,11 @@ bind('folder-choose',()=>{$('download_path').value=folderPath;$('folder-picker')
 bind('check-path',async()=>{$('path-result').textContent=(await post('check_path',$('download_path').value)).storage.message;});
 bind('save',async()=>{const data={};{% for key in config %}if($({{key|tojson}})){const el=$({{key|tojson}});data[{{key|tojson}}]=el.type==='checkbox'?el.checked:el.value;}{% endfor %}msg((await post('save',JSON.stringify(data))).msg);});
 bind('run',async()=>msg((await post('run')).msg));bind('domain',async()=>msg((await post('domain',$('probe').value)).msg));
-bind('analyze',async()=>msg((await post('analyze',$('novel').value)).msg));bind('add-auto',async()=>msg((await post('add_auto',$('novel').value)).msg));
+bind('analyze',async()=>{const d=await post('analyze',$('novel').value);analysis=null;rendered='';$('episodes').replaceChildren();$('book-title').textContent='작품과 저장 파일 확인 중';count();msg(d.msg);});bind('add-auto',async()=>msg((await post('add_auto',$('novel').value)).msg));
 bind('select-range',()=>{const a=Number($('range-from').value),b=Number($('range-to').value);if(!Number.isInteger(a)||!Number.isInteger(b)||a<1||b<a)throw new Error('회차 범위를 확인하세요.');document.querySelectorAll('#episodes input').forEach(x=>x.checked=!x.disabled&&Number(x.dataset.no)>=a&&Number(x.dataset.no)<=b);count();});
+bind('select-missing',()=>{document.querySelectorAll('#episodes input').forEach(x=>x.checked=!x.disabled);count();});
 bind('select-none',()=>{document.querySelectorAll('#episodes input').forEach(x=>x.checked=false);count();});
-bind('download',async()=>{if(!analysis)throw new Error('먼저 작품을 분석하세요.');const ids=Array.from(document.querySelectorAll('#episodes input:checked')).map(x=>x.value);if(!ids.length)throw new Error('받을 회차를 선택하세요.');msg((await post('download',analysis.id,JSON.stringify(ids))).msg);});
+bind('download',async()=>{if(!analysis)throw new Error('먼저 작품을 분석하세요.');const ids=Array.from(document.querySelectorAll('#episodes input:checked:not(:disabled)')).map(x=>x.value);if(!ids.length)throw new Error('받을 회차를 선택하세요.');msg((await post('download',analysis.id,JSON.stringify(ids))).msg);});
 async function history(){const d=await post('history');$('history').replaceChildren();for(const r of d.rows){const tr=document.createElement('tr');[r.novel_id,r.no,r.title,labels[r.status]||r.status,r.error||r.path].forEach(t=>cell(tr,t));$('history').appendChild(tr);}}
 async function titles(){const d=await post('titles');$('title-list').replaceChildren();$('titles').value=d.rows.map(x=>x.id).join('\n');for(const x of d.rows){const tr=document.createElement('tr');cell(tr,x.title+' ['+x.id+']');cell(tr,x.completed);const td=cell(tr,'');for(const [label,command] of [['지금 받기','run_title'],['목록에서 제외','remove_auto']]){const b=document.createElement('button');b.textContent=label;b.onclick=async()=>{try{msg((await post(command,x.id)).msg);if(command==='remove_auto')await titles();}catch(e){msg(e.message);}};td.appendChild(b);}$('title-list').appendChild(tr);}}
 bind('register-title',async()=>{msg((await post('add_auto',$('add-title').value)).msg);await titles();});bind('refresh-titles',titles);if(page==='setting')titles().catch(e=>msg(e.message));

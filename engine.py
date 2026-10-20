@@ -315,6 +315,7 @@ class Engine:
     def run(self, kind, ids, config, selected, handle):
         client = None
         downloads = []
+        book, root = None, None
         source = config.get('source', '작품 분석' if kind == 'analyze' else '도메인 확인' if kind == 'domain' else '수동 다운로드' if selected is not None else '자동 목록 수집')
         self.update(message=source + ' 시작 · 작품 ' + ', '.join(ids))
         try:
@@ -343,7 +344,7 @@ class Engine:
                             if not self.history.valid(nid, item, root):
                                 self.history.record(nid, item, 'locked', error='목록에 잠금/유료 표시')
                             skipped += 1
-                        elif wanted is None and self.history.valid(nid, item, root):
+                        elif self.history.valid(nid, item, root):
                             skipped += 1
                         else:
                             candidates.append(item)
@@ -408,6 +409,13 @@ class Engine:
         except Exception as exc:
             self.update(status='failed', message='처리 오류: ' + type(exc).__name__, last_error=type(exc).__name__ + ': ' + str(exc), finished=now())
         finally:
+            if book is not None and root is not None:
+                try:
+                    for item in book['episodes']:
+                        item['have'] = self.history.valid(book['id'], item, root)
+                    self.update(analysis=book)
+                except Exception as exc:
+                    self.update(last_warning='저장 상태 갱신 실패: ' + type(exc).__name__)
             try:
                 if client:
                     client.close()
