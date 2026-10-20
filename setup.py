@@ -7,6 +7,7 @@ setting = {
         {'uri': 'basic/setting', 'name': '설정'},
         {'uri': 'basic/manual', 'name': '수동 다운로드'},
         {'uri': 'basic/integration', 'name': '연동 / 알림'},
+        {'uri': 'basic/files', 'name': '기존 파일 관리'},
         {'uri': 'basic/history', 'name': '다운로드 이력'},
         {'uri': 'basic/log', 'name': '로그'},
     ]},

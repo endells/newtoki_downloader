@@ -52,7 +52,7 @@
 @media(max-width:650px){.nt-grid{grid-template-columns:1fr}.nt-card{padding:12px}.nt{padding:12px 8px}.nt .nt-scroll table td,.nt .nt-scroll table th{padding:7px;font-size:12px}}
 </style>
 <main class="nt">
-<h3>북토끼 소설 다운 <span class="badge">v0.2.5 · 테스트</span></h3>
+<h3>북토끼 소설 다운 <span class="badge">v0.2.6 · 테스트</span></h3>
 <section class="nt-status" aria-label="작업 상태">
  <div class="nt-row"><strong>작업 상태</strong><span id="state" class="nt-state" role="status">확인 중</span><button id="stop" disabled>중지</button></div>
  <div id="counts"></div><progress id="progress" value="0" max="1"></progress><div id="error" class="nt-error"></div><div id="domain-change"></div><div id="domain-attempts" class="nt-msg"></div>
@@ -122,6 +122,14 @@
 <label>채널 웹훅 URL</label><input id="dc-url" type="password" autocomplete="new-password" placeholder="빈칸은 기존 웹훅 유지"><small id="dc-saved"></small><label class="nt-check"><input id="dc-clear" type="checkbox">웹훅 삭제</label>
 <div class="nt-actions"><button id="dc-save">알림 설정 저장</button><button id="dc-test">테스트 알림</button></div>
 <small>Discord 채널 설정 → 연동 → 웹후크 → 웹후크 URL 복사. 수동·예약 수집의 작품명, 회차, 결과, 오류와 구버전 도메인 변경 주소를 전송합니다. 새 다운로드도 변경도 없는 정상 작업은 알림을 생략합니다.</small></section>
+{% elif page == 'files' %}
+<section class="nt-card"><h3>기존 파일 관리 · 이름 끝 번호 정리</h3>
+<p>저장 폴더: {{ config.download_path }}</p>
+<p class="nt-note">플러그인의 다운로드 이력과 작품 정보를 기준으로 작품 폴더 끝의 [작품번호], TXT 파일 끝의 [회차ID]를 제거합니다. 앞의 회차 번호와 제목은 유지하며, 파일 내용·표지·EPUB은 그대로 보존합니다. 같은 이름이 있거나 내용이 일치하지 않는 파일은 건너뛰고 이유를 표시합니다.</p>
+<div class="nt-actions"><button id="files-scan" class="primary" data-work>기존 파일 검사</button><button id="files-apply" data-work>번호 정리 실행</button></div>
+<small>검사는 변경 예정 이름만 표시합니다. 번호 정리 실행은 현재 파일을 다시 확인하고 이름과 이력 경로를 함께 변경합니다. 사이트 접속이나 다운로드는 하지 않습니다. 이력이 없는 외부 파일은 임의로 정리하지 않습니다.</small>
+<div id="file-summary" class="nt-msg"></div><div class="nt-scroll"><table><thead><tr><th>구분</th><th>현재 경로</th><th>변경 경로</th><th>처리 결과</th></tr></thead><tbody id="file-rows"></tbody></table></div>
+</section>
 {% elif page == 'activity' %}
 <section class="nt-card"><div class="nt-actions"><strong>최근 로그 300건</strong><button id="refresh-activity">새로고침</button></div><div class="nt-scroll"><table><thead><tr><th>시각</th><th>수준</th><th>내용</th></tr></thead><tbody id="activity"></tbody></table></div></section>
 {% else %}
@@ -151,8 +159,10 @@ async function poll(){try{const d=await post('status'),s=d.state;running=s.statu
  $('domain-attempts').textContent=(s.domain_attempts||[]).map(a=>a.kind+' · '+a.url+' · '+a.message).join('\n');
  if(s.domain_change){$('domain-change').textContent='도메인 변경: '+s.domain_change.old+' → '+s.domain_change.new;if($('base_url'))$('base_url').value=s.domain_change.new;}
  if(page==='manual'&&s.analysis){const key=JSON.stringify(s.analysis);if(key!==rendered){draw(s.analysis);rendered=key;}}
+ if(page==='files'&&s.file_report){const r=s.file_report;$('file-summary').textContent='변경 예정 '+r.planned+' · 파일 변경 '+r.files_renamed+' · 폴더 변경 '+r.folders_renamed+' · 이력 복구 '+r.history_repaired+' · 충돌 '+r.conflicts+' · 제외 '+r.skipped+(r.truncated?' · 결과는 500건까지 표시':'');$('file-rows').replaceChildren();for(const item of r.rows){const tr=document.createElement('tr');[item.kind,item.source,item.target,item.message].forEach(v=>cell(tr,v));$('file-rows').appendChild(tr);}}
  if(page==='manual')count();
  }catch(e){msg(e.message);}setTimeout(poll,2000);}
+bind('files-scan',async()=>msg((await post('files_scan')).msg));bind('files-apply',async()=>msg((await post('files_apply')).msg));
 bind('stop',async()=>msg((await post('stop')).msg));
 async function browsePath(path=''){
  const data=(await post('browse_path',path)).folders;folderPath=data.path;folderParent=data.parent;

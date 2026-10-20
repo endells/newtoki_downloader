@@ -191,7 +191,7 @@ class ModuleBasic(PluginModuleBase):
     def process_menu(self, page, req):
         if page == 'log':
             page = 'activity'
-        if page not in ('setting', 'manual', 'history', 'integration', 'activity'):
+        if page not in ('setting', 'manual', 'history', 'integration', 'activity', 'files'):
             page = 'setting'
         if 'newtoki_csrf' not in session:
             session['newtoki_csrf'] = secrets.token_urlsafe(32)
@@ -204,6 +204,9 @@ class ModuleBasic(PluginModuleBase):
             if not expected or not secrets.compare_digest(expected, req.form.get('csrf_token', '')):
                 return jsonify(ret='error', msg='페이지를 새로고침하세요.'), 403
             engine = self._engine()
+            if command in ('files_scan', 'files_apply'):
+                engine.start(command, [], self.runtime())
+                return jsonify(ret='success', msg='기존 파일 ' + ('검사' if command == 'files_scan' else '정리') + '를 시작했습니다.')
             if command == 'activity':
                 return jsonify(ret='success', rows=self.activity.rows())
             if command == 'integration_settings':

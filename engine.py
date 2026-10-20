@@ -224,12 +224,16 @@ class Engine:
         with self.guard:
             return copy.deepcopy(self.state)
 
+    def stop_check(self):
+        if self.stop.is_set():
+            raise Cancelled('중지했습니다.')
+
     def cancel(self):
         self.stop.set()
 
     def start(self, kind, ids, config, selected=None):
         import fcntl
-        if kind not in ('analyze', 'download', 'domain') or not ids:
+        if kind not in ('analyze', 'download', 'domain', 'files_scan', 'files_apply') or (not ids and kind not in ('files_scan', 'files_apply')):
             raise SiteError('작업 종류와 작품 번호가 필요합니다.')
         ids = [novel_id(x) for x in ids]
         with self.guard:
@@ -316,10 +320,20 @@ class Engine:
         client = None
         downloads = []
         book, root = None, None
-        source = config.get('source', '작품 분석' if kind == 'analyze' else '도메인 확인' if kind == 'domain' else '수동 다운로드' if selected is not None else '자동 목록 수집')
-        self.update(message=source + ' 시작 · 작품 ' + ', '.join(ids))
+        source = config.get('source', '기존 파일 검사' if kind == 'files_scan' else '기존 파일 번호 정리' if kind == 'files_apply' else '작품 분석' if kind == 'analyze' else '도메인 확인' if kind == 'domain' else '수동 다운로드' if selected is not None else '자동 목록 수집')
+        self.update(message=source + ' 시작' + (' · 작품 ' + ', '.join(ids) if ids else ''))
         try:
             root = Path(config['download_path']).resolve()
+            if kind in ('files_scan', 'files_apply'):
+                try:
+                    from .file_manager import manage_files
+                except ImportError:
+                    from file_manager import manage_files
+                report = manage_files(root, self.history, kind == 'files_apply', self.stop_check, self.update)
+                count = report['files_renamed'] + report['folders_renamed'] + report['history_repaired']
+                self.update(file_report=report, completed=count, status='completed', finished=now(),
+                            message='기존 파일 %s 완료 · 변경 예정 %s · 파일 변경 %s · 폴더 변경 %s · 충돌 %s · 제외 %s' % ('정리' if report['applied'] else '검사', report['planned'], report['files_renamed'], report['folders_renamed'], report['conflicts'], report['skipped']))
+                return
             client = self.factory(config['base_url'], config['browser_url'], config['request_delay'], self.stop, config['timeout'])
             if kind == 'domain' or config.get('auto_domain'):
                 self.resolve(client, ids[0], config)
@@ -351,7 +365,14 @@ class Engine:
                     if wanted is None:
                         candidates = candidates[:config['max_per_title']]
                     self.update(total=len(candidates), done=0, skipped=skipped, title=book['title'])
-                    folder = safe_path(root, '%s [%s]' % (safe_name(book['title']), nid))
+                    folder = safe_path(root, safe_name(book['title']))
+                    if folder.exists() and any(folder.iterdir()):
+                        try:
+                            existing = json.loads(safe_path(folder, 'metadata.json').read_text(encoding='utf-8'))
+                        except (OSError, ValueError):
+                            raise SiteError('같은 이름의 기존 폴더를 확인할 수 없습니다. 기존 파일 관리에서 먼저 확인하세요.') from None
+                        if str(existing.get('id')) != nid:
+                            raise SiteError('같은 제목의 다른 작품 폴더가 있습니다. 저장 경로를 구분하세요.')
                     folder.mkdir(parents=True, exist_ok=True)
                     if config.get('save_cover', True) and book.get('cover_url'):
                         try:
@@ -375,8 +396,12 @@ class Engine:
                         self.update(message='받는 중: %s / %s' % (book['title'], item['title']), episode_id=item['id'])
                         try:
                             text = client.body(nid, item)
-                            filename = '%0*d_%s [%s].txt' % (config['episode_digits'], item['no'], safe_name(item['title']), item['id'])
+                            filename = '%0*d_%s.txt' % (config['episode_digits'], item['no'], safe_name(item['title']))
                             path = safe_path(folder, filename)
+                            if path.exists():
+                                same = self.history.query('SELECT * FROM entries WHERE novel_id=? AND episode_id=? AND path=?', (nid, item['id'], str(path)))
+                                if not same:
+                                    raise SiteError('같은 이름의 파일이 있어 덮어쓰지 않았습니다: ' + path.name)
                             data = ('%s. %s\n\n%s\n' % (item['no'], item['title'], text)).encode('utf-8')
                             client.check()
                             atomic_write(path, data)

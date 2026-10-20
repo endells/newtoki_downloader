@@ -53,7 +53,7 @@ class FFTests(unittest.TestCase):
     def test_menu_templates_render_and_escape(self):
         from flask import session
         self.settings.set('titles','123')
-        for page in ('setting','manual','history','integration','activity'):
+        for page in ('setting','manual','history','integration','activity','files'):
             with self.app.test_request_context('/'):
                 output=self.module.process_menu(page,None)
                 self.assertIn('newtoki_downloader/ajax/basic/command',output)
