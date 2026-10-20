@@ -71,17 +71,19 @@ class El {
  appendChild(x){this.children.push(x);return x;}
  replaceChildren(){this.children=[];}
  addEventListener(k,f){this.handlers[k]=f;}
+ focus(){this.focused=true;}
 }
 const elements=Object.fromEntries(IDS.map(id=>[id,new El()]));
 function inputs(){const all=[];function walk(n){if(n.tag==='input')all.push(n);n.children.forEach(walk);}walk(elements.episodes);return all;}
 const document={getElementById:id=>elements[id]||null,createElement:tag=>new El(tag),querySelectorAll:q=>q.startsWith('#episodes input')?inputs().filter(n=>(!q.includes(':checked')||n.checked)&&(!q.includes(':not(:disabled)')||!n.disabled)):[]};
 let state={status:'completed',message:'완료',analysis:{id:'123',title:'작품',pages:[1],episodes:[{id:'1001',no:1,title:'1화',have:true,locked:false},{id:'1002',no:2,title:'2화',have:false,locked:false},{id:'1003',no:3,title:'3화',have:false,locked:true}]}};
 const timers=[],requests=[];
-const context={document,URLSearchParams,console,setTimeout:f=>timers.push(f),setInterval:()=>{},fetch:async(url,options)=>{const command=options.body.get('command');requests.push({command,ids:options.body.get('arg2')});return {ok:true,json:async()=>({ret:'success',state,msg:'작업 시작'})};}};
+const context={document,URLSearchParams,console,setTimeout:f=>timers.push(f),setInterval:()=>{},fetch:async(url,options)=>{const command=options.body.get('command');requests.push({command,ids:options.body.get('arg2')});return {ok:true,json:async()=>({ret:'success',state,rows:[{id:'567',title:'최근 작품'}],msg:'작업 시작'})};}};
 vm.runInNewContext(SCRIPT,context);
 (async()=>{
  await new Promise(setImmediate);
  function assert(v,m){if(!v)throw Error(m);}
+ const recent=elements['recent-books'].children[0],beforeClick=requests.length;assert(recent.textContent==='567 - 최근 작품','recent work label');await recent.handlers.click();assert(elements.novel.value==='567','only work number filled');assert(requests.length===beforeClick,'recent click must not analyze or download');
  let boxes=inputs();assert(boxes.length===3,'3 rows expected');assert(boxes[0].disabled&&!boxes[0].checked,'saved row excluded');assert(boxes[1].checked&&!boxes[1].disabled,'missing selected');assert(boxes[2].disabled&&!boxes[2].checked,'locked excluded');
  await elements['select-none'].handlers.click();assert(inputs().every(x=>!x.checked),'none');
  await elements['select-missing'].handlers.click();assert(inputs()[1].checked&&!inputs()[0].checked,'all missing only');

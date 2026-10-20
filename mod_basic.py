@@ -209,6 +209,8 @@ class ModuleBasic(PluginModuleBase):
             if not expected or not secrets.compare_digest(expected, req.form.get('csrf_token', '')):
                 return jsonify(ret='error', msg='페이지를 새로고침하세요.'), 403
             engine = self._engine()
+            if command == 'recent_books':
+                return jsonify(ret='success', rows=engine.recent_books())
             if command in ('files_scan', 'files_apply'):
                 engine.start(command, [], self.runtime())
                 return jsonify(ret='success', msg='기존 파일 ' + ('검사' if command == 'files_scan' else '정리') + '를 시작했습니다.')

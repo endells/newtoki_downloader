@@ -226,6 +226,9 @@ class Engine:
         rows = self.history.query('SELECT title,author,updated FROM books WHERE id=?', (nid,))
         return rows[0] if rows else {'title': '분석 전', 'author': '', 'updated': ''}
 
+    def recent_books(self):
+        return self.history.query('SELECT id,title FROM books ORDER BY updated DESC,rowid DESC LIMIT 5')
+
     def update(self, **values):
         with self.guard:
             changed = {k: v for k, v in values.items() if self.state.get(k) != v}
