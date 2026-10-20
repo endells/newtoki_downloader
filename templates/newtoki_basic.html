@@ -1,11 +1,58 @@
 {% extends "base.html" %}
 {% block content %}
 <style>
-.nt{max-width:1150px;margin:14px auto;padding:0 14px;color:#172b45}.nt h3{font-size:22px}.nt small{color:#445a73}.nt-card{padding:18px;margin:14px 0;background:#fff;border:1px solid #ccd6e2;border-radius:10px}.nt-status{padding:10px 14px;border:1px solid #a9c4e5;border-left:5px solid #326fba;border-radius:8px;background:#eef5ff;font-size:13px}.nt-row{display:flex;gap:10px;align-items:center;flex-wrap:wrap}.nt-state{flex:1;min-width:200px;overflow-wrap:anywhere}.nt input[type=text],.nt input[type=number],.nt textarea{border:1px solid #9aabbd;border-radius:5px;padding:8px;width:100%;background:#fff;color:#172b45}.nt label{display:block;margin:12px 0 5px;font-weight:600}.nt-check{font-weight:400!important}.nt-check input{margin-right:7px}.nt-grid{display:grid;grid-template-columns:1fr 1fr;gap:0 20px}.nt-actions{display:flex;gap:8px;flex-wrap:wrap;margin:12px 0}.nt button{border:1px solid #9aaec8;border-radius:5px;padding:7px 12px;background:#f3f6fa;color:#183b67}.nt button.primary{background:#2365b3;color:white;border-color:#2365b3}.nt button:disabled{opacity:.5;cursor:not-allowed}.nt-note{background:#fff6e3;color:#6a4900;padding:12px;border-radius:6px;line-height:1.6}.nt-error{color:#a51e2c;white-space:pre-wrap;overflow-wrap:anywhere}.nt table{width:100%;border-collapse:collapse}.nt th,.nt td{padding:8px;border-bottom:1px solid #dde4ed;text-align:left;word-break:break-word}.nt th{background:#eaf1fb;position:sticky;top:0}.nt-scroll{max-height:560px;overflow:auto}.nt progress{width:100%;height:7px;display:block;margin-top:6px}.nt-msg{white-space:pre-wrap;overflow-wrap:anywhere;font-size:13px;margin:8px 0}.nt #counts{color:#385578;font-size:12px}.nt .range{width:85px!important}.nt .badge{font-size:11px;color:#2365b3;background:#eaf1fb;padding:3px 7px}
-@media(max-width:650px){.nt-grid{grid-template-columns:1fr}.nt-card{padding:12px}.nt{padding:0 8px}.nt td,.nt th{padding:6px;font-size:12px}}
+/* Scoped dark palette; explicitly color cells to override inherited FF skin colors. */
+.nt{--nt-bg:#101827;--nt-surface:#182335;--nt-input:#0e1726;--nt-border:#435674;--nt-text:#e8eff9;--nt-muted:#b8c9df;max-width:1150px;margin:14px auto;padding:18px;background:var(--nt-bg);color:var(--nt-text)!important;border:1px solid #34465f;border-radius:12px;color-scheme:dark;line-height:1.6}
+.nt h3{font-size:22px;margin:0 0 14px;color:#f3f7ff!important}
+.nt label,.nt strong,.nt #book-title,.nt #selection{color:#e8eff9!important}
+.nt small{display:block;color:var(--nt-muted)!important;line-height:1.6;margin-top:5px}
+.nt-card{padding:18px;margin:14px 0;background:var(--nt-surface)!important;color:var(--nt-text)!important;border:1px solid var(--nt-border);border-radius:10px}
+.nt-status{padding:10px 14px;border:1px solid #4776aa;border-left:5px solid #6fb4ff;border-radius:8px;background:#162e4a!important;color:#edf5ff!important;font-size:13px}
+.nt-row{display:flex;gap:10px;align-items:center;flex-wrap:wrap}
+.nt-state{flex:1;min-width:200px;overflow-wrap:anywhere;color:#edf5ff!important}
+.nt input[type=text],.nt input[type=number],.nt textarea{border:1px solid #60799a!important;border-radius:5px;padding:8px;width:100%;background:var(--nt-input)!important;color:#f0f5ff!important;caret-color:#91c6ff}
+.nt input::placeholder,.nt textarea::placeholder{color:#a4b7cf!important;opacity:1}
+.nt input[type=checkbox]{accent-color:#69b3ff;cursor:pointer;width:16px;height:16px;vertical-align:middle}
+.nt input[type=checkbox]:disabled{cursor:not-allowed;opacity:.65}
+.nt input:focus,.nt textarea:focus,.nt button:focus-visible{outline:2px solid #91c6ff!important;outline-offset:2px}
+.nt label{display:block;margin:12px 0 5px;font-weight:600}
+.nt-check{font-weight:400!important}
+.nt-check input{margin-right:7px}
+.nt-grid{display:grid;grid-template-columns:1fr 1fr;gap:0 20px}
+.nt-actions{display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin:12px 0}
+.nt button{border:1px solid #6984a7!important;border-radius:5px;padding:7px 12px;background:#293d58!important;color:#f0f5ff!important;font-weight:600;transition:background .12s,border-color .12s}
+.nt button:hover:not(:disabled){background:#365477!important;border-color:#a1cfff!important}
+.nt button.primary{background:#285fa8!important;color:#fff!important;border-color:#7db4ff!important}
+.nt button.primary:hover:not(:disabled){background:#3477c8!important}
+.nt button:disabled{background:#202e42!important;color:#a8b9ce!important;border-color:#495d77!important;opacity:.8;cursor:not-allowed}
+.nt-note{background:#30291e!important;color:#f8dba5!important;border:1px solid #826638;border-left:4px solid #e5b860;padding:12px;border-radius:6px;line-height:1.7}
+.nt .nt-error{color:#ffb3bd!important;white-space:pre-wrap;overflow-wrap:anywhere}
+.nt .nt-error:not(:empty){background:#3d202d;border:1px solid #965566;border-radius:5px;padding:7px 9px;margin-top:7px}
+.nt .nt-scroll{max-height:560px;overflow:auto;border:1px solid #526885;border-radius:7px;background:#172235;scrollbar-color:#718aa9 #172235}
+.nt .nt-scroll table{width:100%;border-collapse:collapse;background:#172235!important;color:var(--nt-text)!important;margin:0!important}
+.nt .nt-scroll table th,.nt .nt-scroll table td{padding:9px 10px;border-bottom:1px solid #40526d!important;text-align:left;word-break:break-word;color:#e8eff9!important;background:#172235!important}
+.nt .nt-scroll table th{background:#304561!important;color:#f5f8ff!important;position:sticky;top:0;z-index:1;font-weight:700}
+.nt .nt-scroll table tbody tr:nth-child(even) td{background:#1e2d43!important}
+.nt .nt-scroll table tbody tr:hover td{background:#2b405b!important}
+.nt .nt-scroll table tbody tr:has(input:checked) td{background:#294c73!important;color:#fff!important}
+.nt #episodes td:first-child,.nt #episodes th:first-child{width:55px;text-align:center}
+.nt #episodes td:nth-child(2),.nt #episodes th:nth-child(2){width:70px;font-variant-numeric:tabular-nums}
+.nt #episodes td:last-child,.nt #episodes th:last-child{min-width:130px}
+.nt progress{width:100%;height:7px;display:block;margin-top:6px;border:0;border-radius:4px;overflow:hidden;background:#314760;accent-color:#71b7ff}
+.nt progress::-webkit-progress-bar{background:#314760}
+.nt progress::-webkit-progress-value{background:#71b7ff}
+.nt progress::-moz-progress-bar{background:#71b7ff}
+.nt-msg{color:#e1edff!important;white-space:pre-wrap;overflow-wrap:anywhere;font-size:13px;margin:8px 0}
+.nt #counts{color:#c1d5ef!important;font-size:12px}
+.nt #domain-change{color:#a0e3ce!important;overflow-wrap:anywhere}
+.nt .range{width:85px!important}
+.nt .badge{font-size:11px;color:#d9ebff!important;background:#29466c!important;padding:3px 7px;border:1px solid #5c88bd;vertical-align:middle}
+.nt a{color:#9bcaff!important}
+.nt [hidden]{display:none!important}
+@media(max-width:650px){.nt-grid{grid-template-columns:1fr}.nt-card{padding:12px}.nt{padding:12px 8px}.nt .nt-scroll table td,.nt .nt-scroll table th{padding:7px;font-size:12px}}
 </style>
 <main class="nt">
-<h3>북토끼 소설 다운 <span class="badge">v0.1.1 · 테스트</span></h3>
+<h3>북토끼 소설 다운 <span class="badge">v0.1.2 · 테스트</span></h3>
 <section class="nt-status" aria-label="작업 상태">
  <div class="nt-row"><strong>작업 상태</strong><span id="state" class="nt-state" role="status">확인 중</span><button id="stop" disabled>중지</button></div>
  <div id="counts"></div><progress id="progress" value="0" max="1"></progress><div id="error" class="nt-error"></div><div id="domain-change"></div>
