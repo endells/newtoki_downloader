@@ -111,7 +111,7 @@ class FFTests(unittest.TestCase):
     def test_log_menu_alias_and_live_refresh(self):
         with self.app.test_request_context('/'):
             output=self.module.process_menu('log',None)
-            self.assertIn('최근 활동 로그',output)
+            self.assertIn('최근 로그',output)
             self.assertIn('setInterval(refresh,3000)',output)
         source=(ROOT/'setup.py').read_text()
         self.assertIn("'uri': 'basic/log'",source)
