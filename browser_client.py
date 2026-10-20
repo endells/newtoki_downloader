@@ -179,8 +179,29 @@ class BrowserClient:
         raise SiteError('페이지 로딩 시간이 초과되었습니다.' + (' ' + last_navigation_error if last_navigation_error else ''))
 
     def body(self, nid, item):
+        html = self.html('/novel/%s/%s' % (nid, item['id']))
+        return self.displayed_body(nid, item, html)
+
+    def continue_body(self, nid, item):
+        # User explicitly resumes the same visible task tab. No navigation or challenge solving.
+        try:
+            return self.displayed_body(nid, item)
+        except NavigationPending:
+            raise Pending('확인한 페이지가 전환 중입니다.') from None
+        except SiteError as exc:
+            if '회차 뷰어 정보를 찾을 수 없습니다' in str(exc):
+                raise Blocked('현재 작업 탭에서 본문이 준비되지 않았습니다. 해당 회차를 직접 확인한 후 계속을 누르세요.') from None
+            raise
+
+    def displayed_body(self, nid, item, html=None):
         path = '/novel/%s/%s' % (nid, item['id'])
-        html = self.html(path)
+        current = self.evaluate('location.href')
+        if origin(current) != self.base or urlsplit(current).path != path:
+            raise Blocked('전용 브라우저의 작업 탭에서 해당 회차를 열고 확인 후 계속을 누르세요.')
+        if html is None:
+            html = self.evaluate("document.documentElement ? document.documentElement.outerHTML : ''") or ''
+            if not html:
+                raise Pending('현재 작업 탭의 문서가 아직 준비되지 않았습니다.')
         meta = viewer_config(html, nid, item['id'])
         if int(meta.get('no') or 0) != int(item['no']):
             raise SiteError('목록과 본문의 회차 번호가 다릅니다.')
@@ -196,8 +217,7 @@ class BrowserClient:
             if origin(current) != self.base or urlsplit(current).path != path:
                 raise Blocked('본문 로딩 중 다른 페이지로 이동했습니다.')
             try:
-                text = validate_body(state)
-                return text
+                return validate_body(state)
             except Pending:
                 self.stop.wait(0.5)
         raise Pending('본문이 표시되지 않았습니다. 전용 브라우저의 해당 탭을 확인하세요.')

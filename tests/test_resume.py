@@ -1,0 +1,92 @@
+from pathlib import Path
+import sys
+import threading
+import time
+import unittest
+from unittest.mock import Mock, patch
+sys.path.insert(0,str(Path(__file__).resolve().parents[1]))
+import test_core as fixtures
+from parser import Blocked, Pending, SiteError
+from browser_client import BrowserClient
+
+class PauseResume(unittest.TestCase):
+    setUp=fixtures.EngineTests.setUp
+    run_job=fixtures.EngineTests.run_job
+    def wait(self,predicate):
+        deadline=time.monotonic()+3
+        while time.monotonic()<deadline:
+            if predicate():return
+            threading.Event().wait(.01)
+        self.fail('worker did not reach expected state: '+str(self.engine.snapshot()))
+
+    def challenge_client(self):
+        class C(fixtures.FakeClient):
+            def __init__(self,*args):super().__init__(*args);self.normal=[];self.resumes=0;self.confirmed=False
+            def body(self,nid,item):
+                self.normal.append(item['id'])
+                if item['no']==2:raise Blocked('본문 보안 검증에 실패했습니다.')
+                return fixtures.TEXT
+            def continue_body(self,nid,item):
+                self.resumes+=1
+                if not self.confirmed:raise Blocked('아직 보안 확인 필요')
+                return fixtures.TEXT
+        c=C(fixtures.BASE);self.engine.factory=lambda *args:c
+        return c
+
+    def test_security_wait_never_auto_retries_and_explicit_resume_continues(self):
+        c=self.challenge_client();alerts=[];self.config['on_verification']=alerts.append
+        self.engine.start('download',['123'],self.config,['1001','1002','1003'])
+        self.addCleanup(lambda:(self.engine.cancel(),self.engine.thread.join(2)))
+        self.wait(lambda:self.engine.snapshot()['status']=='verification_waiting')
+        self.assertEqual(c.normal,['1001','1002']);self.assertEqual(c.resumes,0)
+        self.assertEqual(self.engine.snapshot()['completed'],1)
+        self.assertTrue(next((self.root/'books').rglob('*.epub')).exists())
+        self.wait(lambda:len(alerts)==1)
+        with self.assertRaises(SiteError):self.engine.start('analyze',['123'],self.config)
+        self.engine.resume()
+        self.wait(lambda:c.resumes==1 and self.engine.snapshot()['status']=='verification_waiting')
+        self.assertEqual(c.normal,['1001','1002']);self.assertEqual(len(alerts),1)
+        c.confirmed=True;self.engine.resume();self.engine.thread.join(3)
+        self.assertEqual(self.engine.snapshot()['status'],'completed')
+        self.assertEqual(self.engine.snapshot()['completed'],3)
+        self.assertEqual(c.normal,['1001','1002','1003'])
+        self.assertFalse(c.keep_tab)
+
+    def test_stop_during_security_wait_preserves_completed_files(self):
+        self.challenge_client()
+        self.engine.start('download',['123'],self.config,['1001','1002'])
+        self.wait(lambda:self.engine.snapshot()['status']=='verification_waiting')
+        self.engine.cancel();self.engine.thread.join(3)
+        self.assertFalse(self.engine.thread.is_alive())
+        self.assertEqual(self.engine.snapshot()['status'],'canceled')
+        self.assertEqual(self.engine.snapshot()['completed'],1)
+        self.assertEqual(len(list((self.root/'books').rglob('*.txt'))),1)
+
+    def test_pending_retries_once_and_persistent_pending_stops(self):
+        class C(fixtures.FakeClient):
+            count=0
+            def body(self,*args):
+                self.count+=1
+                if self.count==1:raise Pending('본문 대기')
+                return fixtures.TEXT
+        c=C(fixtures.BASE);self.engine.factory=lambda *args:c
+        with patch.object(self.engine.stop,'wait',return_value=False):
+            self.assertEqual(self.run_job(['1001'])['completed'],1)
+        self.assertEqual(c.count,2)
+        class Always(C):
+            def body(self,*args):self.count+=1;raise Pending('계속 본문 대기')
+        c=Always(fixtures.BASE)
+        with patch.object(self.engine.stop,'wait',return_value=False):
+            state=self.run_job(['1002'])
+        self.assertEqual(state['status'],'body_pending');self.assertEqual(c.count,2)
+
+    def test_browser_resume_reads_same_tab_without_navigation(self):
+        c=BrowserClient(fixtures.BASE,'http://127.0.0.1:9222')
+        c.html=Mock(side_effect=AssertionError('no navigation'))
+        c.call=Mock(side_effect=AssertionError('no commands beyond mocked evaluation'))
+        c.evaluate=Mock(side_effect=[fixtures.BASE+'/novel/123/1001',fixtures.viewer(),fixtures.BASE+'/novel/123/1001',{'rendered':True,'text':fixtures.TEXT,'images':0}])
+        self.assertEqual(c.continue_body('123',{'id':'1001','no':1}),fixtures.TEXT)
+        c.html.assert_not_called();c.call.assert_not_called()
+        c.evaluate=Mock(side_effect=[fixtures.BASE+'/novel/123/1001','<title>Just a moment...</title>Verify you are human'])
+        with self.assertRaises(Blocked):c.continue_body('123',{'id':'1001','no':1})
+        c.html.assert_not_called()

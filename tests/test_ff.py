@@ -168,5 +168,19 @@ class FFTests(unittest.TestCase):
         self.assertEqual(self.module.config()['browser_url'],'http://127.0.0.1:9223')
         self.assertFalse(self.module.config()['auto_domain'])
 
+    def test_manual_defaults_removed_and_resume_command(self):
+        from unittest.mock import patch
+        import re
+        with self.app.test_request_context('/'):
+            html=self.module.process_menu('manual',None)
+        field=re.search(r'<input id="novel"[^>]*>',html).group(0)
+        self.assertNotIn('value=',field)
+        self.assertNotIn('id="range-from"',html)
+        self.assertNotIn('id="select-range"',html)
+        self.assertIn('id="resume"',html)
+        with patch.object(self.module.engine,'resume') as resume:
+            self.assertEqual(self.send('resume')['ret'],'success')
+            resume.assert_called_once()
+
 
 if __name__=='__main__':unittest.main()

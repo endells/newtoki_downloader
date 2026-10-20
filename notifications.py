@@ -91,7 +91,7 @@ def summary_messages(report):
     source = report.get('source', '수동 다운로드')
     lines = ['북토끼 알리미 · ' + source,
              '결과: %s | 완료 %s · 실패 %s · 건너뜀 %s' % (
-                 {'completed': '완료', 'failed': '오류', 'auth_required': '로그인 필요', 'verification_required': '보안 확인 필요', 'locked': '잠금 회차', 'body_pending': '본문 대기', 'canceled': '중지'}.get(state['status'], state['status']),
+                 {'completed': '완료', 'failed': '오류', 'auth_required': '로그인 필요', 'verification_waiting': '보안 확인 대기', 'verification_required': '보안 확인 필요', 'locked': '잠금 회차', 'body_pending': '본문 대기', 'canceled': '중지'}.get(state['status'], state['status']),
                  state.get('completed', 0), state.get('failed', 0), state.get('skipped', 0))]
     grouped = {}
     for item in report.get('downloads', []):
@@ -103,6 +103,8 @@ def summary_messages(report):
         lines += list(range_lines(group['episodes']))
     if state.get('history_imported'):
         lines += ['파일명 회차로 이력 반영: %s회' % state['history_imported']]
+    if state.get('status') == 'verification_waiting':
+        lines += [('대기 회차: %04d' % state['episode_no']) if state.get('episode_no') is not None else '회차 확인 필요', '확인할 회차: ' + state.get('verification_url', ''), '전용 브라우저에서 직접 확인 후 FF의 확인 후 계속을 누르세요.']
     if state.get('domain_change'):
         change = state['domain_change']
         lines += ['', '도메인 변경: ' + change['old'] + ' → ' + change['new']]
@@ -110,7 +112,7 @@ def summary_messages(report):
         lines += ['', '오류: ' + redact(state.get('last_error') or state.get('message', ''))[:600]]
     if state.get('warnings'):
         lines += ['경고: ' + redact(state.get('last_warning', ''))[:500]]
-    lines += ['종료: ' + state.get('finished', now())]
+    lines += [('대기 시작: ' if state.get('status') == 'verification_waiting' else '종료: ') + state.get('finished', now())]
     messages, current = [], ''
     for line in lines:
         line = line[:900]

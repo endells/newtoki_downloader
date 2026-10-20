@@ -102,7 +102,12 @@ class ModuleBasic(PluginModuleBase):
         conf['save_domain'] = self.save_domain
         conf['on_finished'] = self.download_finished
         conf['on_event'] = self.record_event
+        conf['on_verification'] = self.verification_waiting
         return conf
+
+    def verification_waiting(self, state):
+        if self.discord.notify({'state': state, 'source': '보안 확인 대기', 'downloads': []}):
+            self.activity.add('INFO', 'Discord 보안 확인 대기 알림 전송 완료')
 
     def download_finished(self, report):
         state = report['state']
@@ -248,6 +253,9 @@ class ModuleBasic(PluginModuleBase):
                 return jsonify(ret='success', state=engine.snapshot())
             if command == 'history':
                 return jsonify(ret='success', rows=engine.history.rows())
+            if command == 'resume':
+                engine.resume()
+                return jsonify(ret='success', msg='현재 브라우저 탭의 확인 결과를 읽고 이어서 진행합니다.')
             if command == 'stop':
                 engine.cancel()
                 return jsonify(ret='success', msg='중지를 요청했습니다.')
@@ -307,7 +315,7 @@ class ModuleBasic(PluginModuleBase):
     def scheduler_function(self):
         try:
             # A challenge/locked state needs explicit user intervention; do not loop.
-            if self._engine().snapshot()['status'] in ('verification_required', 'body_pending', 'locked', 'failed'):
+            if self._engine().snapshot()['status'] in ('verification_waiting', 'verification_required', 'body_pending', 'locked', 'failed'):
                 return
             conf = self.runtime()
             conf['source'] = '예약 수집'

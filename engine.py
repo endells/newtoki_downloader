@@ -214,9 +214,11 @@ class Engine:
     def __init__(self, db_path, factory=BrowserClient):
         self.history, self.factory = History(db_path), factory
         self.guard, self.stop = threading.Lock(), threading.Event()
+        self.resume_signal = threading.Event()
         self.lock_path = str(db_path) + '.lock'
         self.thread = None
         self.on_event = None
+        self.on_verification = None
         self.history.query('CREATE TABLE IF NOT EXISTS books (id TEXT PRIMARY KEY, title TEXT, author TEXT, updated TEXT)')
         self.state = {'status': 'idle', 'message': '대기 중', 'completed': 0, 'skipped': 0, 'failed': 0}
 
@@ -247,6 +249,58 @@ class Engine:
 
     def cancel(self):
         self.stop.set()
+        self.resume_signal.set()
+
+    def resume(self):
+        with self.guard:
+            if self.state['status'] != 'verification_waiting' or not self.thread or not self.thread.is_alive():
+                raise SiteError('현재 보안 확인 대기 중인 작업이 없습니다.')
+            self.resume_signal.set()
+
+    def read_body(self, client, nid, item, on_wait=None):
+        resumed, retries, announced = False, 0, False
+        while True:
+            self.stop_check()
+            client.check()
+            try:
+                text = client.continue_body(nid, item) if resumed else client.body(nid, item)
+                client.keep_tab = False
+                return text
+            except Blocked as exc:
+                # Never retry, refresh or skip a security check automatically.
+                client.keep_tab = True
+                self.resume_signal.clear()
+                if on_wait and not announced:
+                    try:
+                        on_wait()
+                    except Cancelled:
+                        raise
+                    except Exception as export_error:
+                        self.update(last_warning='대기 전 EPUB 저장 실패: ' + type(export_error).__name__)
+                self.update(status='verification_waiting', last_error=str(exc),
+                            verification_url=client.base + '/novel/%s/%s' % (nid, item['id']),
+                            message='보안 확인 대기 · 현재 %s회차 / %s편 저장 완료 · 전용 브라우저에서 확인 후 계속을 누르세요.' % (item['no'], self.snapshot().get('completed', 0)))
+                if self.on_verification and not announced:
+                    try:
+                        self.on_verification(self.snapshot())
+                    except Exception as notify_error:
+                        self.update(last_warning='보안 확인 대기 알림 실패: ' + type(notify_error).__name__)
+                announced = True
+                while not self.resume_signal.wait(.5):
+                    self.stop_check()
+                    client.check()
+                self.stop_check()
+                client.check()
+                self.update(status='running', message='확인한 작업 탭에서 현재 회차 본문 읽는 중', last_error='')
+                resumed = True
+            except Pending:
+                if retries >= 1:
+                    raise
+                retries += 1
+                self.update(message='일시적 본문 로딩 지연 · 2초 후 같은 회차를 한 번 다시 확인합니다.')
+                if self.stop.wait(2):
+                    client.check()
+                resumed = False
 
     def start(self, kind, ids, config, selected=None):
         import fcntl
@@ -254,7 +308,7 @@ class Engine:
             raise SiteError('작업 종류와 작품 번호가 필요합니다.')
         ids = [novel_id(x) for x in ids]
         with self.guard:
-            if self.state['status'] == 'running':
+            if self.state['status'] in ('running', 'verification_waiting'):
                 raise SiteError('작업이 진행 중입니다.')
             handle = open(self.lock_path, 'a')
             try:
@@ -263,7 +317,9 @@ class Engine:
                 handle.close()
                 raise SiteError('다른 FF 프로세스에서 작업 중입니다.') from None
             self.stop.clear()
+            self.resume_signal.clear()
             self.on_event = config.get('on_event')
+            self.on_verification = config.get('on_verification')
             self.state = {'status': 'running', 'message': '작업 준비 중', 'kind': kind, 'completed': 0,
                           'skipped': 0, 'failed': 0, 'done': 0, 'total': 0, 'started': now()}
         self.thread = threading.Thread(target=self.run, args=(kind, ids, dict(config), selected, handle), daemon=True)
@@ -426,9 +482,9 @@ class Engine:
                     atomic_write(safe_path(folder, 'info.xml'), ('<?xml version="1.0" encoding="utf-8"?><book><title>' + escape(book['title']) + '</title><author>' + escape(book['author']) + '</author></book>').encode('utf-8'))
                     for i, item in enumerate(candidates):
                         client.check()
-                        self.update(message='받는 중: %s / %s' % (book['title'], item['title']), episode_id=item['id'])
+                        self.update(message='받는 중: %s / %s회차 · 작업 %s/%s' % (book['title'], item['no'], i + 1, len(candidates)), episode_id=item['id'], episode_no=item['no'], position=i + 1)
                         try:
-                            text = client.body(nid, item)
+                            text = self.read_body(client, nid, item, lambda: self.export(folder, book, root, config, client))
                             filename = '%0*d_%s.txt' % (config['episode_digits'], item['no'], safe_name(item['title']))
                             path = safe_path(folder, filename)
                             if path.exists():
