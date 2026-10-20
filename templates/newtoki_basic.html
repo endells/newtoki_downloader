@@ -47,11 +47,12 @@
 .nt #domain-change{color:#a0e3ce!important;overflow-wrap:anywhere}
 .nt .badge{font-size:11px;color:#d9ebff!important;background:#29466c!important;padding:3px 7px;border:1px solid #5c88bd;vertical-align:middle}
 .nt a{color:#9bcaff!important}
+.nt .range{width:95px!important}
 .nt [hidden]{display:none!important}
 @media(max-width:650px){.nt-grid{grid-template-columns:1fr}.nt-card{padding:12px}.nt{padding:12px 8px}.nt .nt-scroll table td,.nt .nt-scroll table th{padding:7px;font-size:12px}}
 </style>
 <main class="nt">
-<h3>북토끼 소설 다운 <span class="badge">v0.2.9 · 테스트</span></h3>
+<h3>북토끼 소설 다운 <span class="badge">v0.2.10 · 테스트</span></h3>
 <section class="nt-status" aria-label="작업 상태">
  <div class="nt-row"><strong>작업 상태</strong><span id="state" class="nt-state" role="status">확인 중</span><button id="resume" class="primary" hidden>확인 후 계속</button><button id="stop" disabled>중지</button></div>
  <div id="verification-help" class="nt-note" hidden></div><div id="counts"></div><progress id="progress" value="0" max="1"></progress><div id="error" class="nt-error"></div><div id="domain-change"></div><div id="domain-attempts" class="nt-msg"></div>
@@ -92,7 +93,7 @@
 <div class="nt-actions"><button id="analyze" class="primary" data-work>작품 분석</button><button id="add-auto">자동 수집에 추가</button></div>
 <p class="nt-note">작품 분석 시 파일명 맨 앞 회차 번호와 크기로 저장 이력을 보완하며, 저장 파일이 확인된 회차는 ‘저장됨’으로 표시하고 선택에서 제외합니다. 미저장 회차만 기본 선택되며 미저장 전체 선택에도 같은 기준을 적용합니다. 파일이 없거나 0바이트면 다시 받을 수 있습니다. 회차 제목이 달라도 맨 앞 번호가 같으면 저장됨으로 반영합니다. 수동 다운로드에는 자동 수집 개수 제한을 적용하지 않습니다.</p>
 <strong id="book-title">작품을 분석하면 전체 페이지의 회차가 표시됩니다.</strong>
-<div class="nt-actions"><button id="select-missing">미저장 전체 선택</button><button id="select-none">선택 해제</button><button id="download" class="primary" data-work>선택 회차 다운로드</button><span id="selection"></span></div>
+<div class="nt-actions"><input id="range-from" class="range" type="number" min="1" step="1" placeholder="시작" aria-label="시작 회차"><span>~</span><input id="range-to" class="range" type="number" min="1" step="1" placeholder="끝" aria-label="마지막 회차"><button id="select-range">범위 선택</button><button id="select-missing">미저장 전체 선택</button><button id="select-none">선택 해제</button><button id="download" class="primary" data-work>선택 회차 다운로드</button><span id="selection"></span></div>
 <div class="nt-scroll"><table><thead><tr><th>선택</th><th>회차</th><th>제목</th><th>상태</th></tr></thead><tbody id="episodes"></tbody></table></div>
 </section>
 {% elif page == 'integration' %}
@@ -186,6 +187,7 @@ bind('save-connection',async()=>{const data={};for(const key of ['base_url','bro
 bind('run',async()=>msg((await post('run')).msg));bind('domain',async()=>msg((await post('domain',$('probe').value)).msg));
 bind('analyze',async()=>{const d=await post('analyze',$('novel').value);analysis=null;rendered='';$('episodes').replaceChildren();$('book-title').textContent='작품과 저장 파일 확인 중';count();msg(d.msg);});bind('add-auto',async()=>msg((await post('add_auto',$('novel').value)).msg));
 
+bind('select-range',()=>{const a=Number($('range-from').value),b=Number($('range-to').value);if(!Number.isInteger(a)||!Number.isInteger(b)||a<1||b<a)throw new Error('시작·끝 회차를 올바르게 입력하세요.');document.querySelectorAll('#episodes input').forEach(x=>x.checked=!x.disabled&&Number(x.dataset.no)>=a&&Number(x.dataset.no)<=b);count();});
 bind('select-missing',()=>{document.querySelectorAll('#episodes input').forEach(x=>x.checked=!x.disabled);count();});
 bind('select-none',()=>{document.querySelectorAll('#episodes input').forEach(x=>x.checked=false);count();});
 bind('download',async()=>{if(!analysis)throw new Error('먼저 작품을 분석하세요.');const ids=Array.from(document.querySelectorAll('#episodes input:checked:not(:disabled)')).map(x=>x.value);if(!ids.length)throw new Error('받을 회차를 선택하세요.');msg((await post('download',analysis.id,JSON.stringify(ids))).msg);});

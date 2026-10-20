@@ -175,8 +175,10 @@ class FFTests(unittest.TestCase):
             html=self.module.process_menu('manual',None)
         field=re.search(r'<input id="novel"[^>]*>',html).group(0)
         self.assertNotIn('value=',field)
-        self.assertNotIn('id="range-from"',html)
-        self.assertNotIn('id="select-range"',html)
+        for field_id in ('range-from','range-to'):
+            field=re.search(r'<input id="'+field_id+r'"[^>]*>',html).group(0)
+            self.assertNotIn('value=',field)
+        self.assertIn('id="select-range"',html)
         self.assertIn('id="resume"',html)
         with patch.object(self.module.engine,'resume') as resume:
             self.assertEqual(self.send('resume')['ret'],'success')

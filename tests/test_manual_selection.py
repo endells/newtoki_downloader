@@ -87,6 +87,9 @@ vm.runInNewContext(SCRIPT,context);
  let boxes=inputs();assert(boxes.length===3,'3 rows expected');assert(boxes[0].disabled&&!boxes[0].checked,'saved row excluded');assert(boxes[1].checked&&!boxes[1].disabled,'missing selected');assert(boxes[2].disabled&&!boxes[2].checked,'locked excluded');
  await elements['select-none'].handlers.click();assert(inputs().every(x=>!x.checked),'none');
  await elements['select-missing'].handlers.click();assert(inputs()[1].checked&&!inputs()[0].checked,'all missing only');
+ assert(elements['range-from'].value===''&&elements['range-to'].value==='','range defaults empty');
+ elements['range-from'].value='1';elements['range-to'].value='1';await elements['select-range'].handlers.click();assert(inputs().every(x=>!x.checked),'saved-only range selects nothing');
+ elements['range-to'].value='3';await elements['select-range'].handlers.click();assert(inputs()[1].checked&&!inputs()[0].checked&&!inputs()[2].checked,'range excludes saved and locked rows');
 
  inputs()[0].checked=true;await elements.download.handlers.click();assert(requests.at(-1).ids==='["1002"]','download filters disabled saved row');
  state.analysis.episodes[1].have=true;await timers.shift()();await new Promise(setImmediate);assert(inputs()[1].disabled&&!inputs()[1].checked,'finished row refreshed');assert(elements.download.disabled,'no remaining selectable rows');
