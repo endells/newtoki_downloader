@@ -146,5 +146,27 @@ class FFTests(unittest.TestCase):
         self.module.record_event('ERROR','cookie: value-hidden')
         self.assertNotIn('value-hidden',self.module.activity.rows()[0]['message'])
 
+    def test_connection_tab_save_preserves_download_settings(self):
+        with self.app.test_request_context('/'):
+            setting=self.module.process_menu('setting',None)
+            integration=self.module.process_menu('integration',None)
+        for key in ('base_url','browser_url','announcement_url','auto_domain','probe','domain'):
+            self.assertNotIn('id="'+key+'"',setting)
+            self.assertIn('id="'+key+'"',integration)
+        self.settings.set('titles','123')
+        previous_path=self.module.config()['download_path']
+        response=self.send('save_connection',json.dumps({'base_url':'https://newtoki2.org','browser_url':'http://127.0.0.1:9223','announcement_url':'https://뉴토주소.com/','auto_domain':False,'titles':'999','basic_auto_start':True}))
+        self.assertEqual(response['ret'],'success')
+        self.assertEqual(self.module.config()['titles'],'123')
+        self.assertEqual(self.module.config()['download_path'],previous_path)
+        self.assertFalse(self.module.config()['basic_auto_start'])
+        self.assertFalse(self.module.config()['auto_domain'])
+        self.assertEqual(self.module.config()['base_url'],'https://newtoki2.org')
+        self.assertIsNone(self.module.engine.thread)
+        self.send('save',json.dumps({'titles':'456'}))
+        self.assertEqual(self.module.config()['base_url'],'https://newtoki2.org')
+        self.assertEqual(self.module.config()['browser_url'],'http://127.0.0.1:9223')
+        self.assertFalse(self.module.config()['auto_domain'])
+
 
 if __name__=='__main__':unittest.main()

@@ -248,6 +248,18 @@ class ModuleBasic(PluginModuleBase):
             if command == 'stop':
                 engine.cancel()
                 return jsonify(ret='success', msg='중지를 요청했습니다.')
+            if command == 'save_connection':
+                raw = json.loads(arg1 or '{}')
+                if not isinstance(raw, dict):
+                    raise SiteError('연결 설정 형식 오류')
+                keys = ('base_url', 'browser_url', 'announcement_url', 'auto_domain')
+                with self.settings_lock:
+                    conf = self.config()
+                    conf.update({k: raw[k] for k in keys if k in raw})
+                    conf = self.validate(conf)
+                    for key in keys:
+                        self.P.ModelSetting.set(key, str(conf[key]))
+                return jsonify(ret='success', msg='연결 / 도메인 설정 저장 완료. 다운로드는 시작하지 않았습니다.')
             if command == 'save':
                 raw = json.loads(arg1 or '{}')
                 if not isinstance(raw, dict):

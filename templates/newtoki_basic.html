@@ -52,7 +52,7 @@
 @media(max-width:650px){.nt-grid{grid-template-columns:1fr}.nt-card{padding:12px}.nt{padding:12px 8px}.nt .nt-scroll table td,.nt .nt-scroll table th{padding:7px;font-size:12px}}
 </style>
 <main class="nt">
-<h3>북토끼 소설 다운 <span class="badge">v0.2.4 · 테스트</span></h3>
+<h3>북토끼 소설 다운 <span class="badge">v0.2.5 · 테스트</span></h3>
 <section class="nt-status" aria-label="작업 상태">
  <div class="nt-row"><strong>작업 상태</strong><span id="state" class="nt-state" role="status">확인 중</span><button id="stop" disabled>중지</button></div>
  <div id="counts"></div><progress id="progress" value="0" max="1"></progress><div id="error" class="nt-error"></div><div id="domain-change"></div><div id="domain-attempts" class="nt-msg"></div>
@@ -64,11 +64,6 @@
 <div class="nt-actions"><input id="add-title" type="text" placeholder="추가할 작품 주소 또는 번호"><button id="register-title">작품 추가</button><button id="refresh-titles">목록 새로고침</button></div>
 <small>목록에 추가해도 즉시 다운로드하지 않습니다. 새로고침은 저장된 목록을 읽습니다.</small>
 <div class="nt-scroll"><table><thead><tr><th>작품</th><th>저장 회차</th><th>관리</th></tr></thead><tbody id="title-list"></tbody></table></div>
-<p class="nt-note">이 사이트는 본문을 브라우저에서 별도로 표시합니다. 먼저 README의 전용 브라우저를 설치하세요. 보안 확인은 그 브라우저에서 직접 처리하며, 로그인·포인트 구매 버튼은 자동으로 누르지 않습니다.</p>
-<div class="nt-grid">
-<div><label for="base_url">현재 기본 주소 (구버전 우선)</label><input id="base_url" type="text" value="{{ config.base_url }}"></div>
-<div><label for="browser_url">전용 브라우저 연결 주소</label><input id="browser_url" type="text" value="{{ config.browser_url }}"><small>동일 Docker 네트워크: http://newtoki-browser:9223</small></div>
-</div>
 <label for="download_path">NAS 저장 폴더</label><input id="download_path" type="text" value="{{ config.download_path }}" placeholder="예: /volume2/도서/북토끼">
 <small>FF에 연결된 NAS 경로를 입력하세요. /volume2가 NAS와 같은 경로로 연결되어 있다면 위 경로에 바로 저장됩니다. /data도 NAS에 연결된 볼륨이면 영구 저장됩니다.</small>
 <div class="nt-actions"><button id="browse-path">폴더 선택</button><button id="check-path">쓰기 확인</button></div>
@@ -83,15 +78,12 @@
 <div><label for="{{ key }}">{{ label }}</label><input id="{{ key }}" type="number" value="{{ config[key] }}" step="{% if key in ['request_delay','epub_line_height','epub_paragraph_gap'] %}0.5{% else %}1{% endif %}"></div>
 {% endfor %}
 </div>
-{% for key,label in [('save_cover','작품 표지 저장 · EPUB 표지에 삽입'),('make_epub','다운로드 완료 회차로 EPUB 합본 생성'),('auto_domain','작업 시작 시 도메인 자동 확인 (구버전 우선)'),('basic_auto_start','자동 수집 사용')] %}
+{% for key,label in [('save_cover','작품 표지 저장 · EPUB 표지에 삽입'),('make_epub','다운로드 완료 회차로 EPUB 합본 생성'),('basic_auto_start','자동 수집 사용')] %}
 <label class="nt-check"><input id="{{ key }}" type="checkbox" {% if config[key] %}checked{% endif %}>{{ label }}</label>
 {% endfor %}
 <small>설정 저장만으로 다운로드하지 않습니다. 보안 확인·잠금·오류로 중단되면 예약 수집도 대기하며, 원인 해결 후 수동 작업을 성공시켜야 재개됩니다.</small>
 <div class="nt-actions"><button id="save" class="primary">설정 저장</button><button id="run" data-work>지금 받기</button></div>
-<label for="announcement_url">도메인 주소 안내 사이트</label><input id="announcement_url" type="text" value="{{ config.announcement_url }}" placeholder="https://뉴토주소.com/">
-<small>안내 사이트 주소는 변경 후 설정 저장을 눌러 적용하세요. 안내된 구버전 → 현재 저장 주소 → 신버전 순으로 작품 목록을 확인합니다. 정상 목록과 기존 작품 제목이 확인된 주소만 적용합니다. 신버전의 사람 확인은 전용 브라우저에서 직접 처리하며 모든 후보 실패 시 기존 주소를 유지합니다.</small>
-<label for="probe">도메인 확인에 사용할 작품 번호</label><input id="probe" type="text" value="58035">
-<div class="nt-actions"><button id="domain" data-work>도메인 확인·적용</button></div>
+
 </section>
 {% elif page == 'manual' %}
 <section class="nt-card">
@@ -103,6 +95,21 @@
 <div class="nt-scroll"><table><thead><tr><th>선택</th><th>회차</th><th>제목</th><th>상태</th></tr></thead><tbody id="episodes"></tbody></table></div>
 </section>
 {% elif page == 'integration' %}
+<section class="nt-card"><h3>사이트 / 브라우저 연결 · 도메인 갱신</h3>
+<p class="nt-note">이 사이트는 본문을 브라우저에서 별도로 표시합니다. 먼저 README의 전용 브라우저를 설치하세요. 보안 확인은 그 브라우저에서 직접 처리하며, 로그인·포인트 구매 버튼은 자동으로 누르지 않습니다.</p>
+<div class="nt-grid">
+<div><label for="base_url">현재 기본 주소 (구버전 우선)</label><input id="base_url" type="text" value="{{ config.base_url }}"></div>
+<div><label for="browser_url">전용 브라우저 연결 주소</label><input id="browser_url" type="text" value="{{ config.browser_url }}"><small>동일 Docker 네트워크: http://newtoki-browser:9223</small></div>
+</div>
+<label for="announcement_url">도메인 주소 안내 사이트</label><input id="announcement_url" type="text" value="{{ config.announcement_url }}" placeholder="https://뉴토주소.com/">
+<small>안내 사이트 주소는 변경 후 연결 / 도메인 설정 저장을 눌러 적용하세요. 안내된 구버전 → 현재 저장 주소 → 신버전 순으로 작품 목록을 확인합니다. 정상 목록과 기존 작품 제목이 확인된 주소만 적용합니다. 신버전의 사람 확인은 전용 브라우저에서 직접 처리하며 모든 후보 실패 시 기존 주소를 유지합니다.</small>
+
+<label class="nt-check"><input id="auto_domain" type="checkbox" {% if config.auto_domain %}checked{% endif %}>작업 시작 시 도메인 자동 확인 (구버전 우선)</label>
+<div class="nt-actions"><button id="save-connection" class="primary">연결 / 도메인 설정 저장</button></div>
+<small>이 영역은 기본 설정과 별도로 저장합니다. 저장만으로 접속 확인이나 다운로드를 시작하지 않습니다.</small>
+<label for="probe">도메인 확인에 사용할 작품 번호</label><input id="probe" type="text" value="58035">
+<div class="nt-actions"><button id="domain" data-work>도메인 확인·적용</button></div>
+</section>
 <section class="nt-card"><h3>텔레그램 채널 → 자동 수집 목록</h3>
 <label class="nt-check"><input id="tg-enabled" type="checkbox">채널 링크 수신 사용</label>
 <label>수신 간격 (분 · 1~1440)</label><input id="tg-interval" type="number" min="1" max="1440" value="1">
@@ -162,6 +169,7 @@ bind('folder-close',()=>{$('folder-picker').hidden=true;});
 bind('folder-choose',()=>{$('download_path').value=folderPath;$('folder-picker').hidden=true;$('path-result').textContent='선택한 경로: '+folderPath+' · 설정 저장을 눌러 적용하세요.';});
 bind('check-path',async()=>{$('path-result').textContent=(await post('check_path',$('download_path').value)).storage.message;});
 bind('save',async()=>{const data={};{% for key in config %}if($({{key|tojson}})){const el=$({{key|tojson}});data[{{key|tojson}}]=el.type==='checkbox'?el.checked:el.value;}{% endfor %}msg((await post('save',JSON.stringify(data))).msg);});
+bind('save-connection',async()=>{const data={};for(const key of ['base_url','browser_url','announcement_url','auto_domain']){const el=$(key);data[key]=el.type==='checkbox'?el.checked:el.value;}msg((await post('save_connection',JSON.stringify(data))).msg);});
 bind('run',async()=>msg((await post('run')).msg));bind('domain',async()=>msg((await post('domain',$('probe').value)).msg));
 bind('analyze',async()=>{const d=await post('analyze',$('novel').value);analysis=null;rendered='';$('episodes').replaceChildren();$('book-title').textContent='작품과 저장 파일 확인 중';count();msg(d.msg);});bind('add-auto',async()=>msg((await post('add_auto',$('novel').value)).msg));
 bind('select-range',()=>{const a=Number($('range-from').value),b=Number($('range-to').value);if(!Number.isInteger(a)||!Number.isInteger(b)||a<1||b<a)throw new Error('회차 범위를 확인하세요.');document.querySelectorAll('#episodes input').forEach(x=>x.checked=!x.disabled&&Number(x.dataset.no)>=a&&Number(x.dataset.no)<=b);count();});
