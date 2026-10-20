@@ -47,6 +47,7 @@ class FFTests(unittest.TestCase):
         self.settings=Settings
         self.module=ModuleBasic(types.SimpleNamespace(ModelSetting=Settings,package_name='newtoki_downloader',logger=self.app.logger))
         self.module.plugin_load()
+        self.addCleanup(self.module.plugin_unload)
         self.scheduler=framework.F.scheduler
 
     def test_menu_templates_render_and_escape(self):
@@ -106,6 +107,44 @@ class FFTests(unittest.TestCase):
         self.send('remove_auto','123')
         self.assertEqual(self.send('titles')['rows'],[])
         self.assertTrue(Path(self.module.engine.history.path).exists())
+
+    def test_log_menu_alias_and_live_refresh(self):
+        with self.app.test_request_context('/'):
+            output=self.module.process_menu('log',None)
+            self.assertIn('최근 활동 로그',output)
+            self.assertIn('setInterval(refresh,3000)',output)
+        source=(ROOT/'setup.py').read_text()
+        self.assertIn("'uri': 'basic/log'",source)
+
+    def test_failed_analysis_records_details_without_downloading(self):
+        from unittest.mock import Mock
+        from newtoki_downloader.parser import SiteError
+        class BrokenBrowser:
+            base='https://newtoki1.org'
+            def check(self):pass
+            def html(self,path):raise SiteError('페이지 JavaScript 실행 실패: TypeError fixture')
+            def close(self):pass
+        self.module.engine.factory=Mock(return_value=BrokenBrowser())
+        self.module.discord.notify=Mock(return_value=False)
+        conf=self.module.runtime();conf['auto_domain']=False
+        self.module.engine.start('analyze',['123'],conf)
+        self.module.engine.thread.join(5)
+        self.assertEqual(self.module.engine.snapshot()['status'],'failed')
+        rows=self.send('activity')['rows']
+        self.assertTrue(any('TypeError fixture' in r['message'] for r in rows))
+        self.assertTrue(any('작품 분석 시작' in r['message'] for r in rows))
+        report=self.module.discord.notify.call_args.args[0]
+        self.assertEqual(report['source'],'작품 분석')
+        self.assertEqual(report['downloads'],[])
+
+    def test_logger_capture_no_duplicate_and_secret_masking(self):
+        self.module.record_event('WARNING','marker tokenless')
+        rows=self.module.activity.rows()
+        self.assertEqual(sum('marker tokenless' in r['message'] for r in rows),1)
+        self.module.P.logger.warning('capture external record')
+        self.assertTrue(any('capture external record' in r['message'] for r in self.module.activity.rows()))
+        self.module.record_event('ERROR','cookie: value-hidden')
+        self.assertNotIn('value-hidden',self.module.activity.rows()[0]['message'])
 
 
 if __name__=='__main__':unittest.main()

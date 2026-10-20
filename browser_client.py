@@ -6,6 +6,7 @@ exports, point purchases, credential entry, or proxy switching.
 import json
 import ipaddress
 import socket
+import re
 import threading
 import time
 import urllib.request
@@ -22,10 +23,22 @@ class NoRedirect(urllib.request.HTTPRedirectHandler):
         return None
 
 
+class NavigationPending(SiteError):
+    """Only a transient browser context loss while a document is navigating."""
+
+
+def browser_detail(value):
+    # Keep the JS error, never the site's stack trace, page HTML or token-bearing URLs.
+    text = str(value or '').split('\n', 1)[0]
+    text = re.sub(r'https?://\S+', '[페이지 주소]', text)
+    text = re.sub(r'(?i)(token|cookie|authorization|password|secret)([\s:=]+)[^\s,;]+', r'\1\2[숨김]', text)
+    return text[:300]
+
+
 BODY_EXPRESSION = r'''(() => {
   const host = document.querySelector('[data-theme-novel-content]');
   const root = host && host.shadowRoot;
-  const notice = host && !root ? (host.innerText || '') : (!host ? (document.body.innerText || '').slice(0, 1000) : '');
+  const notice = host && !root ? (host.innerText || '') : (!host ? (document.body ? document.body.innerText || '' : '').slice(0, 1000) : '');
   const nodes = root ? Array.from(root.children).filter(n => n.tagName !== 'STYLE') : [];
   let gate = {};
   try { gate = JSON.parse(document.getElementById('theme-novel-viewer-data').textContent).paidGate || {}; } catch(e) {}
@@ -116,14 +129,19 @@ class BrowserClient:
             message = json.loads(raw)
             if message.get('id') == ident:
                 if message.get('error'):
-                    raise SiteError('브라우저 명령에 실패했습니다: ' + method)
+                    detail = browser_detail(message['error'].get('message', ''))
+                    if method == 'Runtime.evaluate' and any(x in detail.lower() for x in ('execution context was destroyed', 'cannot find context', 'cannot find default execution context', 'inspected target navigated')):
+                        raise NavigationPending('페이지 전환 중 실행 문맥 대기: ' + detail)
+                    raise SiteError('브라우저 명령 실패 [' + method + ']: ' + detail)
                 return message.get('result', {})
         raise SiteError('브라우저 응답 시간이 초과되었습니다.')
 
     def evaluate(self, expression):
         response = self.call('Runtime.evaluate', {'expression': expression, 'returnByValue': True})
         if response.get('exceptionDetails'):
-            raise SiteError('페이지 구조를 읽지 못했습니다.')
+            error = response['exceptionDetails']
+            detail = browser_detail((error.get('exception') or {}).get('description') or error.get('text'))
+            raise SiteError('페이지 JavaScript 실행 실패 [Runtime.evaluate]: ' + (detail or '상세 정보 없음'))
         return response.get('result', {}).get('value')
 
     def html(self, path):
@@ -137,11 +155,17 @@ class BrowserClient:
         if result.get('errorText'):
             raise SiteError('페이지 탐색 실패: ' + result['errorText'])
         deadline = time.monotonic() + self.timeout
+        last_navigation_error = ''
         while time.monotonic() < deadline:
             self.check()
-            state = self.evaluate("({url:location.href, ready:document.readyState, html:document.documentElement.outerHTML})") or {}
+            try:
+                state = self.evaluate("({url:location.href, ready:document.readyState, html:document.documentElement ? document.documentElement.outerHTML : ''})") or {}
+            except NavigationPending as exc:
+                last_navigation_error = str(exc)
+                self.stop.wait(.3)
+                continue
             actual = state.get('url', '')
-            if actual != 'about:blank':
+            if actual and actual != 'about:blank' and state.get('html'):
                 if origin(actual) != self.base:
                     raise SiteError('다른 도메인으로 이동했습니다. 도메인 확인을 실행하세요.')
                 check_page(state.get('html', ''))
@@ -152,7 +176,7 @@ class BrowserClient:
                 elif state.get('ready') in ('interactive', 'complete'):
                     return state.get('html', '')
             self.stop.wait(0.3)
-        raise SiteError('페이지 로딩 시간이 초과되었습니다.')
+        raise SiteError('페이지 로딩 시간이 초과되었습니다.' + (' ' + last_navigation_error if last_navigation_error else ''))
 
     def body(self, nid, item):
         path = '/novel/%s/%s' % (nid, item['id'])
@@ -163,10 +187,14 @@ class BrowserClient:
         deadline = time.monotonic() + self.timeout
         while time.monotonic() < deadline:
             self.check()
-            current = self.evaluate('location.href')
+            try:
+                current = self.evaluate('location.href')
+                state = self.evaluate(BODY_EXPRESSION)
+            except NavigationPending:
+                self.stop.wait(.5)
+                continue
             if origin(current) != self.base or urlsplit(current).path != path:
                 raise Blocked('본문 로딩 중 다른 페이지로 이동했습니다.')
-            state = self.evaluate(BODY_EXPRESSION)
             try:
                 text = validate_body(state)
                 return text

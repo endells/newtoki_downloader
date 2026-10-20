@@ -94,11 +94,11 @@ def clean(text):
 def origin(value):
     try:
         u = urlsplit(value)
-        if (u.scheme != 'https' or not re.fullmatch(r'newtoki[0-9]+\.(?:org|com|net)', u.hostname or '')
+        if (u.scheme != 'https' or not re.fullmatch(r'(?:newtoki|toki)[0-9]+\.(?:org|com|net)', u.hostname or '')
                 or u.username or u.password or u.port not in (None, 443)):
             raise ValueError()
     except ValueError:
-        raise SiteError('구버전 newtoki숫자.org/com/net HTTPS 주소가 필요합니다.') from None
+        raise SiteError('newtoki숫자 또는 toki숫자의 org/com/net HTTPS 주소가 필요합니다.') from None
     return 'https://' + u.hostname
 
 

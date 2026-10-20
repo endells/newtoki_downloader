@@ -17,11 +17,13 @@ from xml.sax.saxutils import escape
 try:
     from .parser import SiteError, Blocked, Locked, Pending, Cancelled, parse_catalog, discover_legacy, origin, novel_id
     from .browser_client import BrowserClient, NoRedirect
+    from .domain import DEFAULT_ANNOUNCEMENT, fetch_announcement, discover_candidates
 except ImportError:
     from parser import SiteError, Blocked, Locked, Pending, Cancelled, parse_catalog, discover_legacy, origin, novel_id
     from browser_client import BrowserClient, NoRedirect
+    from domain import DEFAULT_ANNOUNCEMENT, fetch_announcement, discover_candidates
 
-ANNOUNCEMENT = 'https://xn--vg1b79zgsf1sj.com/'
+ANNOUNCEMENT = DEFAULT_ANNOUNCEMENT
 
 
 def now():
@@ -197,6 +199,7 @@ class Engine:
         self.guard, self.stop = threading.Lock(), threading.Event()
         self.lock_path = str(db_path) + '.lock'
         self.thread = None
+        self.on_event = None
         self.history.query('CREATE TABLE IF NOT EXISTS books (id TEXT PRIMARY KEY, title TEXT, author TEXT, updated TEXT)')
         self.state = {'status': 'idle', 'message': '대기 중', 'completed': 0, 'skipped': 0, 'failed': 0}
 
@@ -206,7 +209,16 @@ class Engine:
 
     def update(self, **values):
         with self.guard:
+            changed = {k: v for k, v in values.items() if self.state.get(k) != v}
             self.state.update(values)
+        callback = self.on_event
+        if callback:
+            for key in ('message', 'last_error', 'last_warning'):
+                if changed.get(key):
+                    try:
+                        callback('ERROR' if key == 'last_error' else 'WARNING' if key == 'last_warning' else 'INFO', str(changed[key]))
+                    except Exception:
+                        pass
 
     def snapshot(self):
         with self.guard:
@@ -230,6 +242,7 @@ class Engine:
                 handle.close()
                 raise SiteError('다른 FF 프로세스에서 작업 중입니다.') from None
             self.stop.clear()
+            self.on_event = config.get('on_event')
             self.state = {'status': 'running', 'message': '작업 준비 중', 'kind': kind, 'completed': 0,
                           'skipped': 0, 'failed': 0, 'done': 0, 'total': 0, 'started': now()}
         self.thread = threading.Thread(target=self.run, args=(kind, ids, dict(config), selected, handle), daemon=True)
@@ -241,35 +254,69 @@ class Engine:
             raise
 
     def resolve(self, client, nid, config):
-        self.update(message='안내 페이지의 구버전 주소 확인 중')
-        try:
-            req = urllib.request.Request(ANNOUNCEMENT, headers={'User-Agent': 'NewtokiFF/0.1 domain-check'})
-            with urllib.request.build_opener(NoRedirect()).open(req, timeout=15) as response:
-                raw = response.read(2 * 1024 * 1024 + 1)
-            if len(raw) > 2 * 1024 * 1024:
-                raise ValueError()
-            candidate = discover_legacy(raw.decode('utf-8'), ANNOUNCEMENT)
-        except SiteError:
-            raise
-        except Exception:
-            raise SiteError('주소 안내 페이지를 읽지 못했습니다. 현재 주소를 유지합니다.') from None
         old = client.base
-        client.base = candidate
+        self.update(message='안내 사이트에서 구버전 우선 주소 확인 중')
+        warning = ''
         try:
-            parse_catalog(client.html('/novel/' + nid), candidate + '/novel/' + nid)
-        except Exception:
-            client.base = old
+            html, source = fetch_announcement(config.get('announcement_url', ANNOUNCEMENT), client.check)
+            legacy, modern = discover_candidates(html, source)
+        except Cancelled:
             raise
-        if candidate != old:
-            save = config.get('save_domain')
-            if save:
-                save(candidate)
-            self.update(domain_change={'old': old, 'new': candidate, 'time': now()})
-        self.update(base_url=candidate)
+        except SiteError as exc:
+            # An announcement outage must not disable a working current address.
+            legacy, modern = [], []
+            warning = str(exc) + ' 현재 저장 주소의 작품 목록을 확인합니다.'
+            self.update(warnings=True, last_warning=warning)
+        candidates = list(dict.fromkeys(legacy + [old] + modern))
+        attempts, errors = [], []
+        expected_title = self.book_info(nid)['title']
+        for candidate in candidates:
+            client.check()
+            client.base = candidate
+            kind = '구버전' if candidate in legacy else '현재 저장 주소' if candidate == old else '신버전 최후 후보'
+            self.update(message=kind + ' 작품 목록 확인: ' + candidate)
+            try:
+                book = parse_catalog(client.html('/novel/' + nid), candidate + '/novel/' + nid)
+                if expected_title != '분석 전' and book['title'] != expected_title:
+                    raise SiteError('같은 작품 번호의 제목이 기존 작품과 다릅니다. 주소를 적용하지 않습니다.')
+            except Cancelled:
+                client.base = old
+                raise
+            except SiteError as exc:
+                attempts.append({'url': candidate, 'kind': kind, 'status': exc.code, 'message': str(exc)})
+                errors.append(exc)
+                self.update(domain_attempts=attempts)
+                continue
+            except Exception as exc:
+                error = SiteError('주소 접속 실패: ' + type(exc).__name__)
+                attempts.append({'url': candidate, 'kind': kind, 'status': error.code, 'message': str(error)})
+                errors.append(error)
+                self.update(domain_attempts=attempts)
+                continue
+            attempts.append({'url': candidate, 'kind': kind, 'status': 'completed', 'message': '작품 목록 정상 확인'})
+            self.update(domain_attempts=attempts, base_url=candidate)
+            if candidate != old:
+                try:
+                    save = config.get('save_domain')
+                    if save:
+                        save(candidate)
+                except Exception:
+                    client.base = old
+                    raise
+                self.update(domain_change={'old': old, 'new': candidate, 'time': now()})
+            return
+        client.base = old
+        detail = '\n'.join(x['kind'] + ' ' + x['url'] + ': ' + x['message'] for x in attempts)
+        message = '모든 후보의 작품 목록 확인에 실패했습니다. 저장 주소는 유지합니다.\n' + detail
+        if any(isinstance(exc, Blocked) for exc in errors):
+            raise Blocked(message + '\n전용 브라우저에서 표시된 주소의 사람 확인을 직접 처리한 뒤 도메인 확인을 다시 실행하세요.')
+        raise SiteError(message)
 
     def run(self, kind, ids, config, selected, handle):
         client = None
         downloads = []
+        source = config.get('source', '작품 분석' if kind == 'analyze' else '도메인 확인' if kind == 'domain' else '수동 다운로드' if selected is not None else '자동 목록 수집')
+        self.update(message=source + ' 시작 · 작품 ' + ', '.join(ids))
         try:
             root = Path(config['download_path']).resolve()
             client = self.factory(config['base_url'], config['browser_url'], config['request_delay'], self.stop, config['timeout'])
@@ -367,8 +414,8 @@ class Engine:
             finally:
                 try:
                     callback = config.get('on_finished')
-                    if callback and kind in ('download', 'domain'):
-                        callback({'state': self.snapshot(), 'source': config.get('source', '수동 다운로드' if selected is not None else '자동 목록 수집'), 'downloads': downloads, 'base_url': client.base if client else config['base_url']})
+                    if callback:
+                        callback({'state': self.snapshot(), 'source': source, 'downloads': downloads, 'base_url': client.base if client else config['base_url']})
                 except Exception as exc:
                     self.update(last_warning='결과 알림/로그 처리 실패: ' + type(exc).__name__)
                 finally:

@@ -37,6 +37,8 @@ class ActivityLog(logging.Handler):
             db.execute('DELETE FROM activity WHERE id NOT IN (SELECT id FROM activity ORDER BY id DESC LIMIT 1000)')
 
     def emit(self, record):
+        if getattr(record, 'nt_activity_written', False):
+            return
         try:
             self.add(record.levelname, self.format(record))
         except Exception:

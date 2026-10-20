@@ -9,7 +9,7 @@ setting = {
         {'uri': 'basic/integration', 'name': '연동 / 알림'},
         {'uri': 'basic/activity', 'name': '활동 로그'},
         {'uri': 'basic/history', 'name': '다운로드 이력'},
-        {'uri': 'log', 'name': '로그'},
+        {'uri': 'basic/log', 'name': '로그'},
     ]},
 }
 P = create_plugin_instance(setting)

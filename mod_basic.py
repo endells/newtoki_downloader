@@ -1,5 +1,6 @@
 import json
 import math
+import logging
 import os
 import secrets
 import threading
@@ -14,11 +15,12 @@ from .engine import Engine
 from .telegram_feed import TelegramFeed
 from .notifications import ActivityLog, DiscordNotifier
 from .storage import browse_folders, check_storage
+from .domain import announcement_url, DEFAULT_ANNOUNCEMENT
 
 
 class ModuleBasic(PluginModuleBase):
     db_default = {
-        'base_url': 'https://newtoki1.org', 'browser_url': 'http://newtoki-browser:9223',
+        'announcement_url': DEFAULT_ANNOUNCEMENT, 'base_url': 'https://newtoki1.org', 'browser_url': 'http://newtoki-browser:9223',
         'download_path': '', 'titles': '', 'request_delay': '3', 'timeout': '30',
         'episode_digits': '4', 'max_per_title': '10', 'make_epub': 'True',
         'save_cover': 'True', 'epub_line_height': '1.8', 'epub_paragraph_gap': '0.55',
@@ -41,6 +43,15 @@ class ModuleBasic(PluginModuleBase):
         self._engine()
         self.sync_schedule(self.config())
         self.sync_telegram_schedule()
+        if hasattr(self.P.logger, 'addHandler') and self.activity not in self.P.logger.handlers:
+            self.P.logger.addHandler(self.activity)
+        self.record_event('INFO', '북토끼 소설 다운 시작 · 로그 활성화')
+
+    def record_event(self, level, message):
+        from .notifications import redact
+        message = redact(message)
+        self.activity.add(level, message)
+        self.P.logger.log(getattr(logging, level, logging.INFO), message, extra={'nt_activity_written': True})
 
     def _engine(self):
         if self.engine is None:
@@ -51,6 +62,7 @@ class ModuleBasic(PluginModuleBase):
     def validate(raw):
         conf = dict(raw)
         conf['base_url'] = origin(conf['base_url'])
+        conf['announcement_url'] = announcement_url(conf.get('announcement_url', DEFAULT_ANNOUNCEMENT))
         u = urlsplit(conf['browser_url'])
         if u.scheme not in ('http', 'https') or not u.hostname or u.username or u.password or u.path not in ('', '/') or u.query or u.fragment:
             raise SiteError('브라우저 내부 주소 형식을 확인하세요.')
@@ -89,6 +101,7 @@ class ModuleBasic(PluginModuleBase):
         conf = self.config()
         conf['save_domain'] = self.save_domain
         conf['on_finished'] = self.download_finished
+        conf['on_event'] = self.record_event
         return conf
 
     def download_finished(self, report):
@@ -176,6 +189,8 @@ class ModuleBasic(PluginModuleBase):
         F.scheduler.add_job_instance(job, run=False)
 
     def process_menu(self, page, req):
+        if page == 'log':
+            page = 'activity'
         if page not in ('setting', 'manual', 'history', 'integration', 'activity'):
             page = 'setting'
         if 'newtoki_csrf' not in session:
@@ -268,6 +283,7 @@ class ModuleBasic(PluginModuleBase):
                 raise SiteError('지원하지 않는 명령입니다.')
             return jsonify(ret='success', msg='작업을 시작했습니다.')
         except (ValueError, TypeError, KeyError, SiteError) as exc:
+            self.record_event('ERROR', '명령 ' + str(command) + ' 실패: ' + str(exc))
             return jsonify(ret='error', msg=str(exc))
         except Exception:
             self.P.logger.exception('newtoki command failed')
@@ -285,6 +301,8 @@ class ModuleBasic(PluginModuleBase):
             self.P.logger.warning('자동 수집 시작 실패: %s', type(exc).__name__)
 
     def plugin_unload(self):
+        if hasattr(self.P.logger, 'removeHandler'):
+            self.P.logger.removeHandler(self.activity)
         job_id = self.get_scheduler_name() + "_telegram"
         if F.scheduler.is_include(job_id):
             F.scheduler.remove_job(job_id)
