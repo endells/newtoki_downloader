@@ -214,8 +214,20 @@ class ModuleBasic(PluginModuleBase):
             engine = self._engine()
             if command == 'recent_books':
                 return jsonify(ret='success', rows=engine.recent_books())
-            if command in ('files_scan', 'files_apply'):
-                engine.start(command, [], self.runtime())
+            if command == 'file_folders':
+                root = Path(self.config()['download_path']).resolve()
+                if not root.is_dir():
+                    raise SiteError('설정의 NAS 저장 폴더가 없습니다.')
+                return jsonify(ret='success', folders=sorted(p.name for p in root.iterdir() if p.is_dir() and not p.is_symlink()))
+            if command in ('files_scan', 'files_apply', 'files_epub'):
+                from .file_manager import selected_paths
+                config = self.runtime()
+                folders = json.loads(arg1) if arg1 else None
+                selected_paths(config['download_path'], folders)
+                config['file_folders'] = folders
+                engine.start(command, [], config)
+                if command == 'files_epub':
+                    return jsonify(ret='success', msg='기존 파일 확인 후 EPUB 다시 생성을 시작했습니다.')
                 return jsonify(ret='success', msg='기존 파일 ' + ('검사' if command == 'files_scan' else '정리') + '를 시작했습니다.')
             if command == 'activity':
                 return jsonify(ret='success', rows=self.activity.rows())

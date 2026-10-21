@@ -191,5 +191,21 @@ class FFTests(unittest.TestCase):
             with self.assertRaises(Exception):
                 self.module.validate(dict(self.settings.data,**{key:value}))
 
+    def test_file_folder_listing_and_scope_routing(self):
+        from unittest.mock import patch
+        root=Path(self.module.config()['download_path']);root.mkdir(parents=True,exist_ok=True)
+        folder=root/'테스트 작품';folder.mkdir()
+        self.assertEqual(self.send('file_folders')['folders'],['테스트 작품'])
+        with patch.object(self.module.engine,'start') as start:
+            self.assertEqual(self.send('files_epub',json.dumps([folder.name]))['ret'],'success')
+            args=start.call_args.args
+            self.assertEqual(args[0],'files_epub');self.assertEqual(args[2]['file_folders'],[folder.name])
+            start.reset_mock()
+            self.assertEqual(self.send('files_epub','[]')['ret'],'error');start.assert_not_called()
+        with self.app.test_request_context('/'):
+            html=self.module.process_menu('files',None)
+            for ident in ('files-scan','files-apply','files-epub','files-folders'):
+                self.assertIn('id="'+ident+'"',html)
+
 
 if __name__=='__main__':unittest.main()

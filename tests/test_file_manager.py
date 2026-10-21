@@ -8,7 +8,7 @@ from unittest.mock import patch
 sys.path.insert(0,str(Path(__file__).resolve().parents[1]))
 import test_core as fixtures
 from engine import History
-from file_manager import manage_files
+from file_manager import manage_files, rebuild_epubs, selected_paths
 from parser import Cancelled
 
 class FileManagerTests(unittest.TestCase):
@@ -40,6 +40,32 @@ class FileManagerTests(unittest.TestCase):
         self.assertEqual(report['files_renamed'],1);self.assertEqual(report['folders_renamed'],1)
         again=manage_files(self.root,self.history,True)
         self.assertEqual(again['files_renamed'],0);self.assertEqual(again['folders_renamed'],0)
+
+    def test_selected_folder_scan_rebuild_and_rename_leave_other_folder_untouched(self):
+        import zipfile
+        other=self.root/'다른 작품 [456]';other.mkdir()
+        (other/'metadata.json').write_text(json.dumps({'id':'456','title':'다른 작품'}))
+        path=other/'0001_다른 화 [2001].txt';path.write_bytes(b'changed external file')
+        self.history.record('456',dict(id='2001',no=1,title='다른 화'),'completed',path,'old-digest')
+        (other/'다른 작품.epub').write_bytes(b'keep epub')
+        chosen=selected_paths(self.root,[self.folder.name])
+        report=manage_files(self.root,self.history,selected_folders=chosen)
+        rebuild_epubs(self.root,self.history,{},report,selected_folders=chosen)
+        self.assertEqual(report['epub_created'],1)
+        with zipfile.ZipFile(self.folder/'작품.epub') as z:
+            self.assertIn('OEBPS/chapter-1001.xhtml',z.namelist())
+        self.assertEqual(self.history.rows('456')[0]['digest'],'old-digest')
+        self.assertEqual((other/'다른 작품.epub').read_bytes(),b'keep epub')
+        manage_files(self.root,self.history,True,selected_folders=chosen)
+        self.assertTrue((self.root/'작품'/'0001_첫 화.txt').exists())
+        self.assertTrue(path.exists());self.assertTrue(other.exists())
+
+    def test_folder_scope_rejects_empty_traversal_and_symlinks(self):
+        from parser import SiteError
+        link=self.root/'링크';link.symlink_to(self.folder,target_is_directory=True)
+        for names in ([],['..'],['../books'],[str(self.folder)],['링크'],['없는 폴더']):
+            with self.subTest(names=names),self.assertRaises(SiteError):selected_paths(self.root,names)
+        self.assertIsNone(selected_paths(self.root,None))
 
     def test_collisions_keep_existing_files_and_folders(self):
         plain=self.root/'작품';plain.mkdir();(plain/'marker').write_bytes(b'keep')
@@ -121,3 +147,43 @@ class NewNames(unittest.TestCase):
         self.engine.start('files_scan',[],self.config);self.engine.thread.join(5)
         self.assertEqual(self.engine.snapshot()['status'],'completed')
         self.assertIn('file_report',self.engine.snapshot())
+
+    def test_epub_regeneration_reconciles_external_txt_offline_and_ignores_auto_epub_toggle(self):
+        import zipfile
+        self.run_job(['1001'])
+        folder=next((self.root/'books').iterdir())
+        (folder/'002_외부 회차.txt').write_text('외부에서 넣은 두 번째 본문',encoding='utf-8')
+        (folder/'003_빈 회차.txt').write_bytes(b'')
+        (folder/'cover.jpg').write_bytes(b'\xff\xd8\xfftest-cover')
+        epub=folder/'테스트 작품.epub';epub.write_bytes(b'old epub')
+        def fail(*args):raise AssertionError('must not browse')
+        self.engine.factory=fail
+        self.config.update(make_epub=False,epub_line_height=2.2,file_folders=[folder.name])
+        before={p.name:p.read_bytes() for p in folder.glob('*.txt')}
+        self.engine.start('files_epub',[],self.config);self.engine.thread.join(5)
+        state=self.engine.snapshot();self.assertEqual(state['status'],'completed',state)
+        self.assertEqual(state['file_report']['epub_created'],1)
+        self.assertEqual(state['file_report']['epub_failed'],0)
+        self.assertEqual(before,{p.name:p.read_bytes() for p in folder.glob('*.txt')})
+        with zipfile.ZipFile(epub) as z:
+            self.assertIn('OEBPS/chapter-1002.xhtml',z.namelist())
+            self.assertNotIn('OEBPS/chapter-1003.xhtml',z.namelist())
+            self.assertIn('OEBPS/cover.jpg',z.namelist())
+            chapter=z.read('OEBPS/chapter-1002.xhtml').decode()
+            self.assertIn('외부에서 넣은 두 번째 본문',chapter)
+            self.assertIn('line-height:2.2',chapter)
+        epub.write_bytes(b'keep ordinary scan')
+        self.engine.start('files_scan',[],self.config);self.engine.thread.join(5)
+        self.assertEqual(epub.read_bytes(),b'keep ordinary scan')
+
+    def test_cancel_before_epub_replace_preserves_old_epub(self):
+        self.run_job(['1001'])
+        folder=next((self.root/'books').iterdir());epub=folder/'테스트 작품.epub'
+        epub.write_bytes(b'old epub')
+        report={'rows':[]};calls=[]
+        def check():
+            calls.append(1)
+            if len(calls)==4:raise Cancelled('중지')
+        with self.assertRaises(Cancelled):
+            rebuild_epubs(self.root/'books',self.engine.history,{},report,check)
+        self.assertEqual(epub.read_bytes(),b'old epub')

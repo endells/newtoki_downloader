@@ -322,7 +322,7 @@ class Engine:
 
     def start(self, kind, ids, config, selected=None):
         import fcntl
-        if kind not in ('analyze', 'download', 'domain', 'files_scan', 'files_apply') or (not ids and kind not in ('files_scan', 'files_apply')):
+        if kind not in ('analyze', 'download', 'domain', 'files_scan', 'files_apply', 'files_epub') or (not ids and kind not in ('files_scan', 'files_apply', 'files_epub')):
             raise SiteError('작업 종류와 작품 번호가 필요합니다.')
         ids = [novel_id(x) for x in ids]
         with self.guard:
@@ -411,18 +411,27 @@ class Engine:
         client = None
         downloads = []
         book, root = None, None
-        source = config.get('source', '기존 파일 검사' if kind == 'files_scan' else '기존 파일 번호 정리' if kind == 'files_apply' else '작품 분석' if kind == 'analyze' else '도메인 확인' if kind == 'domain' else '수동 다운로드' if selected is not None else '자동 목록 수집')
+        source = config.get('source', 'EPUB 다시 생성' if kind == 'files_epub' else '기존 파일 검사' if kind == 'files_scan' else '기존 파일 번호 정리' if kind == 'files_apply' else '작품 분석' if kind == 'analyze' else '도메인 확인' if kind == 'domain' else '수동 다운로드' if selected is not None else '자동 목록 수집')
         self.update(message=source + ' 시작' + (' · 작품 ' + ', '.join(ids) if ids else ''))
         try:
             root = Path(config['download_path']).resolve()
-            if kind in ('files_scan', 'files_apply'):
+            if kind in ('files_scan', 'files_apply', 'files_epub'):
                 try:
-                    from .file_manager import manage_files
+                    from .file_manager import manage_files, rebuild_epubs, selected_paths
                 except ImportError:
-                    from file_manager import manage_files
-                report = manage_files(root, self.history, kind == 'files_apply', self.stop_check, self.update)
+                    from file_manager import manage_files, rebuild_epubs, selected_paths
+                folders = selected_paths(root, config.get('file_folders'))
+                report = manage_files(root, self.history, kind == 'files_apply', self.stop_check, self.update, folders)
+                if kind == 'files_epub':
+                    self.update(file_report=report)
+                    rebuild_epubs(root, self.history, config, report, self.stop_check, self.update, folders)
                 self.update(history_imported=report['history_imported'], history_missing=report['history_missing'])
                 count = report['files_renamed'] + report['folders_renamed'] + report['history_repaired']
+                if kind == 'files_epub':
+                    self.update(file_report=report, completed=report['epub_created'], failed=report['epub_failed'],
+                                status='failed' if report['epub_failed'] else 'completed', finished=now(),
+                                message='EPUB 다시 생성 완료 · 생성 %s · 실패 %s' % (report['epub_created'], report['epub_failed']))
+                    return
                 self.update(file_report=report, completed=count, status='completed', finished=now(),
                             message='기존 파일 %s 완료 · 변경 예정 %s · 파일 변경 %s · 폴더 변경 %s · 충돌 %s · 제외 %s' % ('정리' if report['applied'] else '검사', report['planned'], report['files_renamed'], report['folders_renamed'], report['conflicts'], report['skipped']))
                 return

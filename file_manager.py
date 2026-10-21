@@ -18,7 +18,8 @@ def metadata_matches(folder, nid):
         p = folder / 'metadata.json'
         if p.is_symlink() or p.stat().st_size > 1024 * 1024:
             return False
-        return str(json.loads(p.read_text(encoding='utf-8')).get('id')) == nid
+        data = json.loads(p.read_text(encoding='utf-8'))
+        return isinstance(data, dict) and str(data.get('id')) == nid
     except (OSError, ValueError, TypeError):
         return False
 
@@ -29,7 +30,24 @@ def rebase_history(history, old, new):
                   (str(new) + os.sep, len(prefix) + 1, now(), len(prefix), prefix))
 
 
-def manage_files(root, history, apply=False, check=lambda: None, update=lambda **kw: None):
+def selected_paths(root, names):
+    root = Path(root).resolve()
+    if names is None:
+        return None
+    if not isinstance(names, list) or not names:
+        raise SiteError('실행할 작품 폴더를 하나 이상 선택하세요.')
+    result = set()
+    for name in names:
+        if not isinstance(name, str) or not name or name in ('.', '..') or Path(name).name != name:
+            raise SiteError('저장 폴더 바로 아래의 작품 폴더만 선택할 수 있습니다.')
+        path = root / name
+        if path.is_symlink() or not path.is_dir() or path.resolve().parent != root:
+            raise SiteError('선택한 작품 폴더가 없거나 허용되지 않는 경로입니다: ' + name)
+        result.add(path)
+    return result
+
+
+def manage_files(root, history, apply=False, check=lambda: None, update=lambda **kw: None, selected_folders=None):
     root = Path(root).resolve()
     if not root.is_dir():
         raise SiteError('설정의 NAS 저장 폴더가 없습니다. 경로를 확인하세요.')
@@ -50,7 +68,7 @@ def manage_files(root, history, apply=False, check=lambda: None, update=lambda *
         from .reconcile import reconcile_library
     except ImportError:
         from reconcile import reconcile_library
-    local = reconcile_library(root, history, check, update)
+    local = reconcile_library(root, history, check, update, selected_folders)
     report.update(history_imported=local['imported'] + local['refreshed'], history_missing=local['missing'],
                   matched=local['matched'], zero=local['zero'], unknown=local['unknown'], books=local['books'], needs_analysis=local['needs_analysis'])
 
@@ -59,6 +77,8 @@ def manage_files(root, history, apply=False, check=lambda: None, update=lambda *
     for row in rows:
         check()
         old = Path(row['path'])
+        if selected_folders is not None and old.parent not in selected_folders:
+            continue
         try:
             old.resolve().relative_to(root)
             if old.is_symlink() or old.parent.is_symlink(): raise ValueError()
@@ -101,6 +121,9 @@ def manage_files(root, history, apply=False, check=lambda: None, update=lambda *
     for row in rows:
         check()
         old = Path(row['path'])
+        allowed = set(selected_folders or ()) | set(projected.values())
+        if selected_folders is not None and old.parent not in allowed:
+            continue
         try:
             old.resolve().relative_to(root)
             if old.is_symlink() or old.parent.is_symlink(): continue
@@ -142,4 +165,59 @@ def manage_files(root, history, apply=False, check=lambda: None, update=lambda *
             old.unlink()
             report['files_renamed'] += 1
         event('파일', old, shown_new, 'renamed' if apply else 'planned', '파일 번호 제거 완료' if apply else '파일 번호 제거 예정')
+    return report
+
+
+def rebuild_epubs(root, history, config, report, check=lambda: None, update=lambda **kw: None, selected_folders=None):
+    """Rebuild from reconciled local files only, without renaming or browsing."""
+    try:
+        from .engine import make_epub, safe_name
+        from .parser import Cancelled
+    except ImportError:
+        from engine import make_epub, safe_name
+        from parser import Cancelled
+    root = Path(root).resolve()
+    catalogs = {str(b['id']): b for b in history.catalogs()}
+    groups = {}
+    for row in history.query("SELECT * FROM entries WHERE status='completed' ORDER BY novel_id,no,episode_id"):
+        check()
+        path = Path(row['path'])
+        if selected_folders is not None and path.parent not in selected_folders:
+            continue
+        try:
+            path.resolve().relative_to(root)
+            relative = path.relative_to(root)
+            if any((root / Path(*relative.parts[:i])).is_symlink() for i in range(1, len(relative.parts) + 1)):
+                continue
+        except (ValueError, OSError):
+            continue
+        if valid_record(row, root):
+            groups.setdefault((row['novel_id'], path.parent), []).append(row)
+    report.update(epub_created=0, epub_failed=0)
+    for (nid, folder), rows in groups.items():
+        check()
+        target = folder
+        try:
+            book = dict(catalogs.get(nid) or {'id': nid, 'title': re.sub(r' \[' + re.escape(nid) + r'\]$', '', folder.name)})
+            meta = folder / 'metadata.json'
+            if meta.exists():
+                if not metadata_matches(folder, nid):
+                    raise SiteError('작품 메타데이터가 일치하지 않아 EPUB 생성 제외')
+                book.update(json.loads(meta.read_text(encoding='utf-8')))
+            target = safe_path(folder, safe_name(book['title']) + '.epub')
+            update(message='EPUB 다시 생성 중: ' + book['title'])
+            make_epub(folder, book, rows, check, config)
+            report['epub_created'] += 1
+            status, message = 'completed', 'EPUB 다시 생성 완료 · %s회차' % len(rows)
+        except Cancelled:
+            raise
+        except (OSError, ValueError, TypeError, KeyError, SiteError) as exc:
+            report['epub_failed'] += 1
+            status, message = 'failed', 'EPUB 생성 실패: ' + str(exc)
+            update(last_warning=message, warnings=True)
+        if len(report['rows']) < 500:
+            report['rows'].append(dict(kind='EPUB', source=str(folder), target=str(target), status=status, message=message))
+        else:
+            report['truncated'] = True
+        update(file_report=report)
     return report

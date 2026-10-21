@@ -81,7 +81,7 @@ def local_folders(root, history, book):
     return output
 
 
-def reconcile_book(root, history, book, check=lambda: None, update=lambda **kw: None):
+def reconcile_book(root, history, book, check=lambda: None, update=lambda **kw: None, selected_folders=None):
     root = Path(root).resolve()
     nid = str(book['id'])
     report = dict(imported=0, refreshed=0, missing=0, matched=0, duplicates=0, zero=0, unknown=0)
@@ -90,6 +90,8 @@ def reconcile_book(root, history, book, check=lambda: None, update=lambda **kw: 
         by_number.setdefault(int(item['no']), []).append(item)
     files, zero_files = {}, {}
     for folder in local_folders(root, history, book):
+        if selected_folders is not None and folder not in selected_folders:
+            continue
         check()
         for path in sorted(folder.iterdir(), key=lambda p: p.name):
             check()
@@ -115,6 +117,8 @@ def reconcile_book(root, history, book, check=lambda: None, update=lambda **kw: 
             continue
         item = items[0]
         previous = old_rows.get(item['id'])
+        if selected_folders is not None and previous and previous['path'] and Path(previous['path']).parent not in selected_folders:
+            continue
         candidates = files.get(number, [])
         if len(candidates) > 1:
             report['duplicates'] += 1
@@ -148,12 +152,14 @@ def reconcile_book(root, history, book, check=lambda: None, update=lambda **kw: 
     return report
 
 
-def reconcile_library(root, history, check=lambda: None, update=lambda **kw: None):
+def reconcile_library(root, history, check=lambda: None, update=lambda **kw: None, selected_folders=None):
     root = Path(root).resolve()
     books = {str(b['id']): b for b in history.catalogs()}
     # Older installations can still reconcile known episode IDs offline from history.
     for folder in root.iterdir() if root.is_dir() else []:
         check()
+        if selected_folders is not None and folder not in selected_folders:
+            continue
         if folder.is_symlink() or not folder.is_dir():
             continue
         try:
@@ -171,12 +177,16 @@ def reconcile_library(root, history, check=lambda: None, update=lambda **kw: Non
     known_folders = set()
     for book in books.values():
         check()
+        if selected_folders is not None and not any(p in selected_folders for p in local_folders(root, history, book)):
+            continue
         known_folders.update(local_folders(root, history, book))
-        report = reconcile_book(root, history, book, check, update)
+        report = reconcile_book(root, history, book, check, update, selected_folders)
         for key, count in report.items():
             total[key] += count
     for folder in root.iterdir() if root.is_dir() else []:
         check()
+        if selected_folders is not None and folder not in selected_folders:
+            continue
         if folder in known_folders or folder.is_symlink() or not folder.is_dir():
             continue
         if any(p.is_file() and not p.is_symlink() and p.suffix.lower() == '.txt' and leading_number(p.name) is not None for p in folder.iterdir()):
