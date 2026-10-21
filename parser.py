@@ -134,7 +134,7 @@ def check_page(html):
     title = doc.first(tag='title')
     title = clean(title.text()).lower() if title else ''
     # Inspect challenge pages, not comments mentioning login, points or Cloudflare.
-    known_site = doc.first(cls='serial-list') or doc.first(cls='novel-eps') or doc.first(attr='data-theme-novel-content')
+    known_site = doc.first(cls='serial-list') or doc.first(cls='novel-eps') or doc.first(cls='novel-viewer') or doc.first(attr='data-theme-novel-content')
     if not known_site:
         visible = doc.text()
         if 'KR_ONLY' in visible:
@@ -259,6 +259,17 @@ def viewer_config(html, nid, eid):
     doc = check_page(html)
     node = next((x for x in doc.walk(tag='script') if x.attrs.get('id') == 'theme-novel-viewer-data'), None)
     if not node:
+        header = doc.first(cls='ne-h1')
+        canonical = next((x.attrs.get('href') for x in doc.walk(tag='link') if x.attrs.get('rel') == 'canonical'), '')
+        if header and canonical:
+            expected = '/novel/%s/%s' % (nid, eid)
+            target = urlsplit(canonical)
+            if target.scheme != 'https' or target.path.rstrip('/') != expected:
+                raise SiteError('요청한 회차와 새 뷰어의 회차 ID가 다릅니다.')
+            number = re.fullmatch(r'([0-9]+)\s*(?:화|회)', clean(header.text()))
+            if not number:
+                raise SiteError('새 뷰어의 회차 번호를 확인하지 못했습니다.')
+            return dict(id=str(eid), no=int(number[1]), title=clean(header.text()), format='modern')
         raise SiteError('회차 뷰어 정보를 찾을 수 없습니다.')
     try:
         cfg = json.loads(node.raw_text())

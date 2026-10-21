@@ -63,6 +63,45 @@ LOAD_MORE_EXPRESSION = r'''(() => {
 
 LOAD_NEWER_EXPRESSION = LOAD_MORE_EXPRESSION.replace('이전 회차 더 보기', '더 최신 회차 보기')
 
+MODERN_STATUS_EXPRESSION = r'''(() => {
+  const article = document.querySelector('article.novel-viewer');
+  const host = article && article.querySelector(':scope > div[style*="--novel-font-size"]');
+  const notice = host ? '' : ((article || document.querySelector('main') || document.body)?.innerText || '').slice(0, 1000);
+  return {title: document.title, message: notice,
+    locked: !host && (notice.includes('로그인') || notice.includes('포인트') && (notice.includes('구매') || notice.includes('결제')))};
+})()'''
+
+
+def modern_dom_body(node):
+    """Read paragraph nodes of an already-rendered viewer, including closed shadow roots."""
+    roots = node.get('shadowRoots') or []
+    if not roots:
+        return dict(rendered=False, text='', images=0)
+    paragraphs, images = [], 0
+    def text(n):
+        name = n.get('nodeName', '').upper()
+        if name in ('STYLE', 'SCRIPT', 'TEMPLATE'):
+            return ''
+        if name == 'BR':
+            return '\n'
+        if n.get('nodeType') == 3:
+            return n.get('nodeValue', '')
+        return ''.join(text(c) for c in n.get('children', []))
+    def walk(n):
+        nonlocal images
+        name = n.get('nodeName', '').upper()
+        if name in ('STYLE', 'SCRIPT', 'TEMPLATE'):
+            return
+        if name in ('IMG','SVG','CANVAS','VIDEO'):
+            images += 1
+        if name == 'P':
+            paragraphs.append(text(n))
+        for c in n.get('children', []):
+            walk(c)
+    for root in roots:
+        walk(root)
+    return dict(rendered=bool(paragraphs), text='\n\n'.join(paragraphs), images=images)
+
 
 def endpoint(value):
     u = urlsplit(str(value).strip())
@@ -308,6 +347,18 @@ class BrowserClient:
                 raise Blocked('현재 작업 탭에서 본문이 준비되지 않았습니다. 해당 회차를 직접 확인한 후 계속을 누르세요.') from None
             raise
 
+    def modern_body(self):
+        state = self.evaluate(MODERN_STATUS_EXPRESSION) or {}
+        # Check human verification and paid/login notices before inspecting the viewer.
+        if state.get('locked') or any(x in str(state.get('message', '')) for x in ('인증','검증','Verify you are human','KR_ONLY')):
+            validate_body(dict(state, rendered=False))
+        root = self.call('DOM.getDocument', {'depth': 0})['root']['nodeId']
+        ident = self.call('DOM.querySelector', {'nodeId': root, 'selector': 'article.novel-viewer > div[style*="--novel-font-size"]'}).get('nodeId')
+        if not ident:
+            return dict(state, rendered=False)
+        node = self.call('DOM.describeNode', {'nodeId': ident, 'depth': -1, 'pierce': True}).get('node', {})
+        return dict(state, **modern_dom_body(node))
+
     def displayed_body(self, nid, item, html=None):
         path = '/novel/%s/%s' % (nid, item['id'])
         current = self.evaluate('location.href')
@@ -325,7 +376,9 @@ class BrowserClient:
             self.check()
             try:
                 current = self.evaluate('location.href')
-                state = self.evaluate(BODY_EXPRESSION)
+                state = self.modern_body() if meta.get('format') == 'modern' else self.evaluate(BODY_EXPRESSION)
+                if meta.get('format') == 'modern':
+                    current = self.evaluate('location.href')
             except NavigationPending:
                 self.stop.wait(.5)
                 continue
