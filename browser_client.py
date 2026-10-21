@@ -13,9 +13,9 @@ import urllib.request
 from urllib.parse import urlsplit, urlunsplit
 
 try:
-    from .parser import SiteError, Blocked, Pending, Cancelled, origin, viewer_config, validate_body, check_page, parse_catalog, CatalogSnapshot
+    from .parser import SiteError, Blocked, Pending, Cancelled, origin, viewer_config, validate_body, check_page, parse_catalog, CatalogSnapshot, verification_notice
 except ImportError:
-    from parser import SiteError, Blocked, Pending, Cancelled, origin, viewer_config, validate_body, check_page, parse_catalog, CatalogSnapshot
+    from parser import SiteError, Blocked, Pending, Cancelled, origin, viewer_config, validate_body, check_page, parse_catalog, CatalogSnapshot, verification_notice
 
 
 class NoRedirect(urllib.request.HTTPRedirectHandler):
@@ -350,7 +350,7 @@ class BrowserClient:
     def modern_body(self):
         state = self.evaluate(MODERN_STATUS_EXPRESSION) or {}
         # Check human verification and paid/login notices before inspecting the viewer.
-        if state.get('locked') or any(x in str(state.get('message', '')) for x in ('인증','검증','Verify you are human','KR_ONLY')):
+        if state.get('locked') or verification_notice(state.get('message', '')) or any(x in str(state.get('message', '')) for x in ('인증','검증')):
             validate_body(dict(state, rendered=False))
         root = self.call('DOM.getDocument', {'depth': 0})['root']['nodeId']
         ident = self.call('DOM.querySelector', {'nodeId': root, 'selector': 'article.novel-viewer > div[style*="--novel-font-size"]'}).get('nodeId')

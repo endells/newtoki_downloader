@@ -33,6 +33,34 @@ class PauseResume(unittest.TestCase):
         c=C(fixtures.BASE);self.engine.factory=lambda *args:c
         return c
 
+    def test_puzzle_after_18_saves_waits_with_link_and_continues_without_failure(self):
+        from parser import viewer_config
+        class C(fixtures.FakeClient):
+            confirmed=False
+            def html(self,path):return fixtures.catalog(range(1,26))
+            def body(self,nid,item):
+                self.calls.append(item['id'])
+                if item['no']==19:
+                    viewer_config('<link rel="canonical" href="https://alias.example/novel/123/1019"><h1 class="ne-h1">19</h1><article class="novel-viewer"><div class="novel-loading">퍼즐 조각을 맞춰주세요 봇 확인 후 컨텐츠 열람 가능합니다.</div></article>',nid,item['id'])
+                return fixtures.TEXT
+            def continue_body(self,nid,item):
+                if not self.confirmed:raise Blocked('밀어서 맞추기')
+                return fixtures.TEXT
+        c=C('https://toki35.com');self.engine.factory=lambda *args:c
+        self.config['batch_size']=100
+        self.engine.start('download',['123'],self.config,[str(1000+n) for n in range(1,26)])
+        self.addCleanup(lambda:(self.engine.cancel(),self.engine.thread.join(2)))
+        self.wait(lambda:self.engine.snapshot()['status']=='verification_waiting')
+        state=self.engine.snapshot()
+        self.assertEqual((state['completed'],state['failed']),(18,0))
+        self.assertEqual(state['verification_url'],'https://toki35.com/novel/123/1019')
+        self.assertEqual(len(c.calls),19)
+        c.confirmed=True;self.engine.resume();self.engine.thread.join(3)
+        self.assertEqual(self.engine.snapshot()['status'],'completed')
+        self.assertEqual(self.engine.snapshot()['completed'],25)
+        self.assertEqual(self.engine.snapshot()['failed'],0)
+        self.assertEqual(c.calls.count('1019'),1)
+
     def test_security_wait_never_auto_retries_and_explicit_resume_continues(self):
         c=self.challenge_client();alerts=[];self.config['on_verification']=alerts.append
         self.engine.start('download',['123'],self.config,['1001','1002','1003'])

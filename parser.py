@@ -129,8 +129,15 @@ def title_ids(value):
     return ids
 
 
+def verification_notice(text):
+    return any(marker in str(text) for marker in ('퍼즐 조각을 맞춰', '봇 확인 후', '밀어서 맞추기', '인증이 필요', '인증 후', '보안 검증', 'Verify you are human', 'KR_ONLY'))
+
+
 def check_page(html):
     doc = Document(html)
+    loading = doc.first(cls='novel-loading')
+    if loading and verification_notice(clean(loading.text())):
+        raise Blocked('본문 인증이 필요합니다: ' + clean(loading.text())[:180])
     title = doc.first(tag='title')
     title = clean(title.text()).lower() if title else ''
     # Inspect challenge pages, not comments mentioning login, points or Cloudflare.
@@ -266,7 +273,7 @@ def viewer_config(html, nid, eid):
             target = urlsplit(canonical)
             if target.scheme != 'https' or target.path.rstrip('/') != expected:
                 raise SiteError('요청한 회차와 새 뷰어의 회차 ID가 다릅니다.')
-            number = re.fullmatch(r'([0-9]+)\s*(?:화|회)', clean(header.text()))
+            number = re.fullmatch(r'([0-9]+)\s*(?:화|회)?', clean(header.text()))
             if not number:
                 raise SiteError('새 뷰어의 회차 번호를 확인하지 못했습니다.')
             return dict(id=str(eid), no=int(number[1]), title=clean(header.text()), format='modern')
@@ -291,7 +298,7 @@ def validate_body(snapshot):
     title = str(snapshot.get('title') or '').lower()
     if snapshot.get('locked'):
         raise Locked('로그인 또는 포인트 구매가 필요한 회차입니다.')
-    if any(x in title for x in ('just a moment', 'access denied', 'attention required')) or any(x in message for x in ('인증', '검증', 'Verify you are human', 'KR_ONLY')):
+    if any(x in title for x in ('just a moment', 'access denied', 'attention required')) or verification_notice(message) or any(x in message for x in ('인증', '검증')):
         raise Blocked('본문 접근 확인이 필요합니다: ' + clean(message)[:180])
     if not snapshot.get('rendered'):
         raise Pending('본문이 아직 표시되지 않았습니다.')

@@ -4,7 +4,7 @@ import sys
 import unittest
 from unittest.mock import Mock
 sys.path.insert(0,str(Path(__file__).resolve().parents[1]))
-from parser import viewer_config, validate_body, SiteError, Blocked, Locked, Pending
+from parser import viewer_config, validate_body, SiteError, Blocked, Locked, Pending, check_page
 from browser_client import BrowserClient, modern_dom_body
 from test_core import TEXT
 
@@ -25,6 +25,13 @@ def closed_tree():
     ]))]}
 
 class ModernViewer(unittest.TestCase):
+    def test_bare_number_heading_and_puzzle_gate_before_metadata(self):
+        html=viewer(278,'57318','8376236').replace('278화','278')
+        self.assertEqual(viewer_config(html,'57318','8376236')['no'],278)
+        gated=html.replace('<div style="--novel-font-size:16px"></div>','<div class="novel-loading">퍼즐 조각을 맞춰주세요 봇 확인 후 컨텐츠 열람 가능합니다. 밀어서 맞추기</div>')
+        with self.assertRaises(Blocked):viewer_config(gated,'57318','8376236')
+        with self.assertRaises(Blocked):validate_body({'rendered':False,'message':'퍼즐 조각을 맞춰주세요 봇 확인 후 컨텐츠 열람 가능합니다.'})
+
     def test_metadata_uses_canonical_path_and_heading_not_hidden_session_state(self):
         meta=viewer_config(viewer(260,'57318','8018729'),'57318','8018729')
         self.assertEqual((meta['id'],meta['no'],meta['format']),('8018729',260,'modern'))
