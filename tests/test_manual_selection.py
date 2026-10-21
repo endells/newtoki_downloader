@@ -72,13 +72,14 @@ class El {
  replaceChildren(){this.children=[];}
  addEventListener(k,f){this.handlers[k]=f;}
  focus(){this.focused=true;}
+ select(){this.selected=true;}
 }
 const elements=Object.fromEntries(IDS.map(id=>[id,new El()]));
 function inputs(){const all=[];function walk(n){if(n.tag==='input')all.push(n);n.children.forEach(walk);}walk(elements.episodes);return all;}
 const document={getElementById:id=>elements[id]||null,createElement:tag=>new El(tag),querySelectorAll:q=>q.startsWith('#episodes input')?inputs().filter(n=>(!q.includes(':checked')||n.checked)&&(!q.includes(':not(:disabled)')||!n.disabled)):[]};
 let state={status:'completed',message:'완료',analysis:{id:'123',title:'작품',pages:[1],episodes:[{id:'1001',no:1,title:'1화',have:true,locked:false},{id:'1002',no:2,title:'2화',have:false,locked:false},{id:'1003',no:3,title:'3화',have:false,locked:true}]}};
-const timers=[],requests=[];
-const context={document,URLSearchParams,console,setTimeout:f=>timers.push(f),setInterval:()=>{},fetch:async(url,options)=>{const command=options.body.get('command');requests.push({command,ids:options.body.get('arg2')});return {ok:true,json:async()=>({ret:'success',state,rows:[{id:'567',title:'최근 작품'}],msg:'작업 시작'})};}};
+const timers=[],requests=[],copied=[];
+const context={document,URLSearchParams,console,navigator:{clipboard:{writeText:async url=>copied.push(url)}},setTimeout:f=>timers.push(f),setInterval:()=>{},fetch:async(url,options)=>{const command=options.body.get('command');requests.push({command,ids:options.body.get('arg2')});return {ok:true,json:async()=>({ret:'success',state,rows:[{id:'567',title:'최근 작품'}],msg:'작업 시작'})};}};
 vm.runInNewContext(SCRIPT,context);
 (async()=>{
  await new Promise(setImmediate);
@@ -93,6 +94,11 @@ vm.runInNewContext(SCRIPT,context);
 
  inputs()[0].checked=true;await elements.download.handlers.click();assert(requests.at(-1).ids==='["1002"]','download filters disabled saved row');
  state.analysis.episodes[1].have=true;await timers.shift()();await new Promise(setImmediate);assert(inputs()[1].disabled&&!inputs()[1].checked,'finished row refreshed');assert(elements.download.disabled,'no remaining selectable rows');
+ state.status='verification_waiting';state.verification_url='https://toki35.com/novel/123';await timers.shift()();await new Promise(setImmediate);
+ assert(!elements['verification-link'].hidden,'copy row visible while waiting');await elements['copy-verification-url'].handlers.click();assert(copied[0]===state.verification_url,'clipboard receives exact verification URL');
+ const field=elements['verification-url'];let value=field.value,assignments=0;Object.defineProperty(field,'value',{get:()=>value,set:v=>{value=v;assignments++;}});
+ await timers.shift()();await new Promise(setImmediate);assert(assignments===0,'unchanged URL must not be assigned on polling');
+ context.navigator.clipboard.writeText=async()=>{throw Error('insecure HTTP')};document.execCommand=command=>command==='copy';await elements['copy-verification-url'].handlers.click();assert(field.selected&&field.focused,'HTTP fallback selects stable input');assert(elements.message.textContent==='주소를 복사했습니다.','HTTP fallback reports successful copy');
 })().catch(e=>{console.error(e);process.exitCode=1;});
 '''.replace('IDS',json.dumps(ids)).replace('SCRIPT',json.dumps(script))
         result=subprocess.run(['node'],input=harness,text=True,capture_output=True)
