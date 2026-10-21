@@ -11,10 +11,10 @@ import test_core as fixtures
 
 BASE='https://toki35.com'
 
-def modern(numbers, total=None, more=False):
+def modern(numbers, total=None, more=False, newer=False):
     total=len(numbers) if total is None else total
     rows=''.join('<div class="novel-ep-row" data-ep="%s" data-episode-id="%s"><a class="novel-ep-link" href="/novel/123/%s"><span class="ne-num">%s화</span><span class="ne-title">%s화</span><span class="ep-badge-up">UP</span></a></div>' % (n,1000+n,1000+n,n,n) for n in numbers)
-    return '<section class="novel-detail"><div class="nd-thumb"><img src="https://cdn.example/cover.png"></div><div class="nd-info"><h1>테스트 작품</h1><div class="nd-meta"><span>테스트 작가</span><span>· %s화</span></div><p class="nd-desc">테스트 설명</p></div></section><section class="adm-card"><div class="novel-episode-head">에피소드 (%s화)</div><div class="novel-eps" data-novel-id="123">%s</div>%s</section>' % (total,total,rows,'<button>이전 회차 더 보기</button>' if more else '')
+    return '<section class="novel-detail"><div class="nd-thumb"><img src="https://cdn.example/cover.png"></div><div class="nd-info"><h1>테스트 작품</h1><div class="nd-meta"><span>테스트 작가</span><span>· %s화</span></div><p class="nd-desc">테스트 설명</p></div></section><section class="adm-card"><div class="novel-episode-head">에피소드 (%s화)</div><div class="novel-eps" data-novel-id="123">%s</div>%s%s</section>' % (total,total,rows,'<button>이전 회차 더 보기</button>' if more else '', '<button>더 최신 회차 보기</button>' if newer else '')
 
 class ModernCatalog(unittest.TestCase):
     def test_metadata_numbers_and_more_are_read_without_badge_text(self):
@@ -55,6 +55,25 @@ class ModernCatalog(unittest.TestCase):
         c.evaluate=Mock(return_value=True);c.continue_html=Mock(side_effect=Blocked('사람 확인'))
         with self.assertRaises(Blocked):c.wait_catalog('/novel/123',modern([3],3,True))
         self.assertEqual(c.evaluate.call_count,1)
+
+    def test_333_episodes_accumulate_when_dom_is_capped_at_300(self):
+        c=BrowserClient(BASE,'http://127.0.0.1:9222');c.stop.wait=Mock(return_value=False)
+        c.evaluate=Mock(return_value=True)
+        c.continue_html=Mock(side_effect=[modern(list(range(333,133,-1)),333,True),modern(list(range(333,33,-1)),333,True),modern(list(range(300,0,-1)),333,False,True)])
+        html=c.wait_catalog('/novel/123',modern(list(range(333,233,-1)),333,True))
+        book=parse_catalog(html,BASE+'/novel/123')
+        self.assertEqual([e['no'] for e in book['episodes']],list(range(1,334)))
+        self.assertEqual(c.evaluate.call_count,3)
+        fake=fixtures.FakeClient(BASE);fake.html=lambda path:html
+        self.assertEqual(len(collect_catalog(fake,'123')['episodes']),333)
+
+    def test_accumulated_windows_survive_manual_security_confirmation(self):
+        c=BrowserClient(BASE,'http://127.0.0.1:9222');c.stop.wait=Mock(return_value=False);c.evaluate=Mock(return_value=True)
+        c.continue_html=Mock(side_effect=[modern([4,3],5,True,True),Blocked('사람 확인')])
+        with self.assertRaises(Blocked):c.wait_catalog('/novel/123',modern([5,4],5,True))
+        c.continue_html=Mock(return_value=modern([2,1],5,False,True))
+        html=c.wait_catalog('/novel/123',modern([3,2],5,True,True))
+        self.assertEqual([e['no'] for e in parse_catalog(html,BASE+'/novel/123')['episodes']],list(range(1,6)))
 
 class ModernHistory(unittest.TestCase):
     setUp=fixtures.EngineTests.setUp

@@ -272,7 +272,7 @@ class Engine:
             try:
                 html = client.continue_html(path) if resumed else client.html(path)
                 if catalog and isinstance(client, BrowserClient):
-                    html = client.wait_catalog(path, html)
+                    html = client.wait_catalog(path, html, self.update)
                 client.keep_tab = False
                 return html
             except Blocked as exc:
@@ -398,7 +398,7 @@ class Engine:
             self.update(warnings=True, last_warning=warning)
         # The user selected the modern site. Never rotate into legacy domains on a gate.
         current = old if urlsplit(old).hostname.startswith('toki') else DEFAULT_BASE
-        candidates = list(dict.fromkeys(modern + [current]))
+        candidates = list(dict.fromkeys(([current] + modern) if current == old else (modern + [current])))
         attempts, errors = [], []
         expected_title = self.book_info(nid)['title']
         for candidate in candidates:
@@ -415,12 +415,12 @@ class Engine:
                 client.base = old
                 raise
             except Blocked as exc:
-                attempts.append({'url': candidate, 'kind': kind, 'status': exc.code, 'message': str(exc)})
+                attempts.append({'url': client.base, 'requested_url': candidate, 'kind': kind, 'status': exc.code, 'message': str(exc)})
                 self.update(domain_attempts=attempts)
                 client.base = old
                 raise
             except SiteError as exc:
-                attempts.append({'url': candidate, 'kind': kind, 'status': exc.code, 'message': str(exc)})
+                attempts.append({'url': client.base, 'requested_url': candidate, 'kind': kind, 'status': exc.code, 'message': str(exc)})
                 errors.append(exc)
                 self.update(domain_attempts=attempts)
                 if isinstance(exc, CatalogStructureError):
@@ -429,12 +429,12 @@ class Engine:
                 continue
             except Exception as exc:
                 error = SiteError('주소 접속 실패: ' + type(exc).__name__)
-                attempts.append({'url': candidate, 'kind': kind, 'status': error.code, 'message': str(error)})
+                attempts.append({'url': client.base, 'requested_url': candidate, 'kind': kind, 'status': error.code, 'message': str(error)})
                 errors.append(error)
                 self.update(domain_attempts=attempts)
                 continue
             final_base = client.base
-            attempts.append({'url': candidate, 'kind': kind, 'status': 'completed', 'message': '작품 목록 정상 확인' + (' · 이동 주소 ' + final_base if candidate != final_base else '')})
+            attempts.append({'url': final_base, 'requested_url': candidate, 'kind': kind, 'status': 'completed', 'message': '작품 목록 정상 확인'})
             self.update(domain_attempts=attempts, base_url=final_base)
             if final_base != old:
                 try:

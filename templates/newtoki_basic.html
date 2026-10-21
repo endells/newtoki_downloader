@@ -60,7 +60,7 @@
 @media(max-width:650px){.nt-grid{grid-template-columns:1fr}.nt-card{padding:12px}.nt{padding:12px 8px}.nt .nt-scroll table td,.nt .nt-scroll table th{padding:7px;font-size:12px}}
 </style>
 <main class="nt">
-<h3>북토끼 소설 다운 <span class="badge">v0.2.18 · 테스트</span></h3>
+<h3>북토끼 소설 다운 <span class="badge">v0.2.19 · 테스트</span></h3>
 <section class="nt-status" aria-label="작업 상태">
  <div class="nt-row"><strong>작업 상태</strong><span id="state" class="nt-state" role="status">확인 중</span><button id="resume" class="primary" hidden>확인 후 계속</button><button id="stop" disabled>중지</button></div>
  <div id="verification-help" class="nt-note" hidden></div><div id="counts"></div><progress id="progress" value="0" max="1"></progress><div id="error" class="nt-error"></div><div id="domain-change"></div><div id="domain-attempts" class="nt-msg"></div>
@@ -114,7 +114,7 @@
 <div><label for="browser_url">전용 브라우저 연결 주소</label><input id="browser_url" type="text" value="{{ config.browser_url }}"><small>동일 Docker 네트워크: http://newtoki-browser:9223</small></div>
 </div>
 <label for="announcement_url">도메인 주소 안내 사이트</label><input id="announcement_url" type="text" value="{{ config.announcement_url }}" placeholder="https://뉴토주소.com/">
-<small>안내된 새 주소 → 현재 저장된 새 주소 순으로 확인합니다. 기존 주소가 구 주소이면 기본 새 주소 https://toki35.com을 사용합니다. 정상 목록과 기존 작품 제목을 확인한 뒤 주소를 저장합니다. 사람 확인·퍼즐은 전용 브라우저의 현재 작업 탭에서 직접 처리하고 ‘확인 후 계속’을 누르세요. 보안 확인이 뜨면 다른 도메인을 시도하지 않고 대기합니다.</small>
+<small>현재 저장된 새 주소를 먼저 확인하고 접속 오류가 있을 때 안내된 새 주소를 확인합니다. 기존 주소가 구 주소이면 안내된 새 주소와 기본 새 주소 https://toki35.com을 사용합니다. 정상 목록과 기존 작품 제목을 확인한 뒤 주소를 저장하며 상태에는 실제 접속 주소를 표시합니다. 사람 확인·퍼즐은 전용 브라우저의 현재 작업 탭에서 직접 처리하고 ‘확인 후 계속’을 누르세요. 보안 확인이 뜨면 다른 도메인을 시도하지 않고 대기합니다.</small>
 
 <label class="nt-check"><input id="auto_domain" type="checkbox" {% if config.auto_domain %}checked{% endif %}>작업 시작 시 새 도메인 자동 확인</label>
 <div class="nt-actions"><button id="save-connection" class="primary">연결 / 도메인 설정 저장</button></div>

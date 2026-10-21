@@ -39,11 +39,11 @@ class Domains(unittest.TestCase):
         self.assertEqual(self.saved,['https://toki34.com'])
         self.assertEqual(self.engine.snapshot()['domain_change']['old'],'https://newtoki1.org')
 
-    def test_current_modern_used_when_announced_modern_is_unavailable(self):
+    def test_saved_modern_precedes_stale_announced_address(self):
         self.client.base='https://toki35.com'
         self.outcomes['https://toki34.com']=SiteError('접속 실패')
         self.resolve()
-        self.assertEqual(self.calls,['https://toki34.com','https://toki35.com'])
+        self.assertEqual(self.calls,['https://toki35.com'])
         self.assertEqual(self.saved,[])
 
     def test_legacy_errors_do_not_affect_modern_selection(self):
@@ -62,6 +62,7 @@ class Domains(unittest.TestCase):
         self.assertEqual(self.saved,['https://toki35.com'])
         self.assertEqual(self.engine.snapshot()['base_url'],'https://toki35.com')
         self.assertEqual(self.engine.snapshot()['domain_change']['new'],'https://toki35.com')
+        self.assertEqual(self.engine.snapshot()['domain_attempts'][-1]['url'],'https://toki35.com')
 
     def test_challenge_never_applied_and_previous_address_kept(self):
         self.outcomes={k:SiteError('접속 실패') for k in ('https://newtoki1.org','https://newtoki2.org')}
@@ -76,10 +77,29 @@ class Domains(unittest.TestCase):
     def test_same_id_wrong_title_not_applied(self):
         self.engine.history.query('INSERT INTO books VALUES (?,?,?,?)',('123','테스트 작품','','now'))
         self.outcomes['https://toki34.com']=catalog([1],title='다른 작품')
+        self.outcomes['https://toki35.com']=catalog([1],title='다른 작품')
         self.client.base='https://toki35.com'
-        self.resolve()
+        with self.assertRaises(SiteError):self.resolve()
         self.assertEqual(self.saved,[])
         self.assertEqual(len(self.calls),2)
+
+    def test_announced_modern_is_used_if_saved_modern_is_unavailable(self):
+        self.client.base='https://toki35.com'
+        self.outcomes['https://toki35.com']=SiteError('접속 실패')
+        self.resolve()
+        self.assertEqual(self.calls,['https://toki35.com','https://toki34.com'])
+        self.assertEqual(self.saved,['https://toki34.com'])
+
+    def test_catalog_failure_reports_actual_redirect_destination(self):
+        from browser_client import CatalogStructureError
+        def failed_redirect(client,path,**kwargs):
+            client.base='https://toki35.com'
+            raise CatalogStructureError('현재 작업 탭을 유지합니다.')
+        with patch.object(self.engine,'read_page',side_effect=failed_redirect):
+            with self.assertRaises(SiteError):self.resolve()
+        attempt=self.engine.snapshot()['domain_attempts'][0]
+        self.assertEqual(attempt['url'],'https://toki35.com')
+        self.assertEqual(attempt['requested_url'],'https://toki34.com')
 
     def test_cancel_does_not_try_other_domains(self):
         self.outcomes['https://toki34.com']=Cancelled('중지')

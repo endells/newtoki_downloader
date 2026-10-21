@@ -3,9 +3,18 @@
 No source HTML, session tokens, or novel text are bundled with this package.
 """
 import json
+import copy
 import re
 from html.parser import HTMLParser
 from urllib.parse import urlsplit, urljoin, parse_qs
+
+
+class CatalogSnapshot(str):
+    """Validated catalog accumulated from multiple rendered windows of the same page."""
+    def __new__(cls, html, catalog):
+        value = super().__new__(cls, html)
+        value.catalog = copy.deepcopy(catalog)
+        return value
 
 
 class SiteError(Exception):
@@ -138,6 +147,10 @@ def check_page(html):
 
 
 def parse_catalog(html, url):
+    if isinstance(html, CatalogSnapshot):
+        if html.catalog['id'] != novel_id(url):
+            raise SiteError('누적 목록의 작품 번호가 일치하지 않습니다.')
+        return copy.deepcopy(html.catalog)
     doc = check_page(html)
     nid, base = novel_id(url), origin(url)
     title_node = doc.first(cls='theme-detail-title-line')
@@ -235,10 +248,11 @@ def parse_modern_catalog(doc, url):
     cover = urljoin(url, image.attrs.get('data-src') or image.attrs.get('src', '')) if image else ''
     head = doc.first(cls='novel-episode-head')
     total = re.search(r'\(([0-9]+)\s*화\)', clean(head.text())) if head else None
-    more = any(clean(button.text()) == '이전 회차 더 보기' for button in doc.walk(tag='button'))
+    older = any(clean(button.text()) == '이전 회차 더 보기' for button in doc.walk(tag='button'))
+    newer = any(clean(button.text()) == '더 최신 회차 보기' for button in doc.walk(tag='button'))
     return dict(id=nid,title=clean(title.text()),author=clean(author.text()) if author else '',
                 description=description.text().strip() if description else '',cover_url=cover if urlsplit(cover).scheme=='https' else '',
-                episodes=episodes,pages=[1],has_more=more and (total is None or len(episodes)<int(total[1])),total_episodes=int(total[1]) if total else None)
+                episodes=episodes,pages=[1],has_older=older,has_newer=newer,has_more=(older or newer) and (total is None or len(episodes)<int(total[1])),total_episodes=int(total[1]) if total else None)
 
 
 def viewer_config(html, nid, eid):

@@ -13,9 +13,9 @@ import urllib.request
 from urllib.parse import urlsplit, urlunsplit
 
 try:
-    from .parser import SiteError, Blocked, Pending, Cancelled, origin, viewer_config, validate_body, check_page, parse_catalog
+    from .parser import SiteError, Blocked, Pending, Cancelled, origin, viewer_config, validate_body, check_page, parse_catalog, CatalogSnapshot
 except ImportError:
-    from parser import SiteError, Blocked, Pending, Cancelled, origin, viewer_config, validate_body, check_page, parse_catalog
+    from parser import SiteError, Blocked, Pending, Cancelled, origin, viewer_config, validate_body, check_page, parse_catalog, CatalogSnapshot
 
 
 class NoRedirect(urllib.request.HTTPRedirectHandler):
@@ -60,6 +60,8 @@ LOAD_MORE_EXPRESSION = r'''(() => {
   button.click();
   return true;
 })()'''
+
+LOAD_NEWER_EXPRESSION = LOAD_MORE_EXPRESSION.replace('이전 회차 더 보기', '더 최신 회차 보기')
 
 
 def endpoint(value):
@@ -168,13 +170,13 @@ class BrowserClient:
                 raise SiteError('다른 도메인 또는 작품 경로로 이동했습니다. 주소를 적용하지 않습니다.')
             self.base = actual_base
 
-    def wait_catalog(self, path, html):
+    def wait_catalog(self, path, html, update=lambda **kw: None):
         deadline = time.monotonic() + self.timeout
         while True:
             self.check()
             try:
                 data = parse_catalog(html, self.base + path)
-                return self.expand_catalog(path, html, data)
+                return self.expand_catalog(path, html, data, update)
             except Blocked:
                 raise
             except SiteError as exc:
@@ -187,38 +189,61 @@ class BrowserClient:
                 self.check()
             html = self.continue_html(path)
 
-    def expand_catalog(self, path, html, data):
+    def expand_catalog(self, path, html, data, update=lambda **kw: None):
+        if 'has_more' not in data:
+            return html
+        if not hasattr(self, 'catalog_progress'):
+            self.catalog_progress = {}
+        key = self.base + path
+        progress = self.catalog_progress.setdefault(key, {'title': data['title'], 'rows': {}, 'newer': False})
         for _ in range(1000):
             self.check()
-            if not data.get('has_more'):
-                if data.get('total_episodes') is not None and len(data['episodes']) != data['total_episodes']:
+            if data['title'] != progress['title']:
+                raise CatalogStructureError('더보기 중 작품 제목이 바뀌었습니다.')
+            for item in data['episodes']:
+                previous_item = progress['rows'].get(item['id'])
+                if previous_item and previous_item != item:
+                    raise CatalogStructureError('더보기 중 같은 회차의 정보가 바뀌었습니다.')
+                progress['rows'][item['id']] = item
+            total = data.get('total_episodes')
+            update(message='작품 목록 누적 %s / %s회 · 현재 화면 %s회' % (len(progress['rows']), total if total is not None else '확인 중', len(data['episodes'])))
+            if (total is not None and len(progress['rows']) == total) or not (data.get('has_older') or data.get('has_newer')):
+                if total is not None and len(progress['rows']) != total:
                     self.keep_tab = True
                     raise CatalogStructureError('표시된 전체 회차 수와 읽은 목록 수가 다릅니다. 일부 목록으로 진행하지 않습니다.')
-                return html
-            previous = len(data['episodes'])
+                merged = dict(data, episodes=sorted(progress['rows'].values(), key=lambda e: (e['no'], int(e['id']))), has_more=False, has_older=False, has_newer=False)
+                if len({e['no'] for e in merged['episodes']}) != len(merged['episodes']):
+                    raise CatalogStructureError('누적 목록에 같은 회차 번호가 중복됩니다.')
+                self.catalog_progress.pop(key, None)
+                return CatalogSnapshot(html, merged)
+            if not data.get('has_older'):
+                progress['newer'] = True
+            previous = tuple(e['id'] for e in data['episodes'])
             if self.stop.wait(self.delay):
                 self.check()
-            if not self.evaluate(LOAD_MORE_EXPRESSION):
+            expression = LOAD_NEWER_EXPRESSION if progress['newer'] else LOAD_MORE_EXPRESSION
+            if not self.evaluate(expression):
                 self.keep_tab = True
-                raise CatalogStructureError('이전 회차 더 보기 버튼을 누를 수 없습니다. 현재 작업 탭을 확인하세요.')
+                raise CatalogStructureError('회차 더 보기 버튼을 누를 수 없습니다. 현재 작업 탭을 확인하세요.')
             deadline = time.monotonic() + self.timeout
             while time.monotonic() < deadline:
                 self.check()
                 html = self.continue_html(path)
                 data = parse_catalog(html, self.base + path)
-                if len(data['episodes']) > previous:
+                if tuple(e['id'] for e in data['episodes']) != previous:
                     break
                 if self.stop.wait(.5):
                     self.check()
             else:
                 self.keep_tab = True
-                raise CatalogStructureError('더보기 후 회차 목록이 늘어나지 않았습니다. 현재 작업 탭을 유지합니다.')
+                raise CatalogStructureError('더보기 후 표시 회차가 바뀌지 않았습니다. 현재 작업 탭을 유지합니다.')
         self.keep_tab = True
         raise CatalogStructureError('목록 더보기 횟수가 1000회를 넘었습니다.')
 
     def html(self, path):
         if not path.startswith('/novel/'):
             raise SiteError('작품 페이지 경로만 열 수 있습니다.')
+        self.catalog_progress = {}
         self.connect()
         if self.stop.wait(max(0, self.last_request + self.delay - time.monotonic())):
             self.check()
