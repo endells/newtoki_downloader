@@ -13,9 +13,9 @@ import urllib.request
 from urllib.parse import urlsplit, urlunsplit
 
 try:
-    from .parser import SiteError, Blocked, Pending, Cancelled, origin, viewer_config, validate_body, check_page
+    from .parser import SiteError, Blocked, Pending, Cancelled, origin, viewer_config, validate_body, check_page, parse_catalog
 except ImportError:
-    from parser import SiteError, Blocked, Pending, Cancelled, origin, viewer_config, validate_body, check_page
+    from parser import SiteError, Blocked, Pending, Cancelled, origin, viewer_config, validate_body, check_page, parse_catalog
 
 
 class NoRedirect(urllib.request.HTTPRedirectHandler):
@@ -25,6 +25,10 @@ class NoRedirect(urllib.request.HTTPRedirectHandler):
 
 class NavigationPending(SiteError):
     """Only a transient browser context loss while a document is navigating."""
+
+
+class CatalogStructureError(SiteError):
+    """A loaded catalog needs a parser update; preserve the visible tab."""
 
 
 def browser_detail(value):
@@ -144,6 +148,36 @@ class BrowserClient:
             raise SiteError('페이지 JavaScript 실행 실패 [Runtime.evaluate]: ' + (detail or '상세 정보 없음'))
         return response.get('result', {}).get('value')
 
+    def accept_location(self, actual, path):
+        """Accept ordinary redirects within the modern site, preserving the requested work/page."""
+        actual_base = origin(actual)
+        current, expected = urlsplit(actual), urlsplit(self.base + path)
+        if actual_base != self.base:
+            modern = lambda host: bool(re.fullmatch(r'toki[0-9]+\.(?:com|org|net)', host or ''))
+            if not (modern(current.hostname) and modern(expected.hostname)
+                    and current.path == expected.path and current.query == expected.query):
+                raise SiteError('다른 도메인 또는 작품 경로로 이동했습니다. 주소를 적용하지 않습니다.')
+            self.base = actual_base
+
+    def wait_catalog(self, path, html):
+        deadline = time.monotonic() + self.timeout
+        while True:
+            self.check()
+            try:
+                parse_catalog(html, self.base + path)
+                return html
+            except Blocked:
+                raise
+            except SiteError as exc:
+                if str(exc) != '작품 제목/회차 목록 구조를 확인하지 못했습니다.':
+                    raise
+                if time.monotonic() >= deadline:
+                    self.keep_tab = True
+                    raise CatalogStructureError('로딩 대기 후에도 작품 제목/회차 목록 구조를 확인하지 못했습니다. 작업 탭은 유지했습니다. 정상 목록 화면의 HTML 파일을 전달해 주세요.') from None
+            if self.stop.wait(.5):
+                self.check()
+            html = self.continue_html(path)
+
     def html(self, path):
         if not path.startswith('/novel/'):
             raise SiteError('작품 페이지 경로만 열 수 있습니다.')
@@ -166,8 +200,7 @@ class BrowserClient:
                 continue
             actual = state.get('url', '')
             if actual and actual != 'about:blank' and state.get('html'):
-                if origin(actual) != self.base:
-                    raise SiteError('다른 도메인으로 이동했습니다. 도메인 확인을 실행하세요.')
+                self.accept_location(actual, path)
                 check_page(state.get('html', ''))
                 expected = urlsplit(self.base + path)
                 if urlsplit(actual).path != expected.path or urlsplit(actual).query != expected.query:
@@ -188,7 +221,8 @@ class BrowserClient:
         if not state.get('url'):
             raise Blocked('현재 작업 탭의 주소를 확인할 수 없습니다.')
         current, expected = urlsplit(state.get('url', '')), urlsplit(self.base + path)
-        if origin(state.get('url', '')) != self.base or current.path != expected.path or current.query != expected.query:
+        self.accept_location(state['url'], path)
+        if current.path != expected.path or current.query != expected.query:
             raise Blocked('확인할 작품 목록과 현재 작업 탭 주소가 다릅니다. 안내된 주소에서 직접 확인하세요.')
         html = state.get('html') or ''
         check_page(html)

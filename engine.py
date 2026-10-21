@@ -17,11 +17,11 @@ from xml.sax.saxutils import escape
 
 try:
     from .parser import SiteError, Blocked, Locked, Pending, Cancelled, parse_catalog, discover_legacy, origin, novel_id
-    from .browser_client import BrowserClient, NoRedirect
+    from .browser_client import BrowserClient, NoRedirect, CatalogStructureError
     from .domain import DEFAULT_ANNOUNCEMENT, DEFAULT_BASE, fetch_announcement, discover_candidates
 except ImportError:
     from parser import SiteError, Blocked, Locked, Pending, Cancelled, parse_catalog, discover_legacy, origin, novel_id
-    from browser_client import BrowserClient, NoRedirect
+    from browser_client import BrowserClient, NoRedirect, CatalogStructureError
     from domain import DEFAULT_ANNOUNCEMENT, DEFAULT_BASE, fetch_announcement, discover_candidates
 
 ANNOUNCEMENT = DEFAULT_ANNOUNCEMENT
@@ -262,13 +262,15 @@ class Engine:
                 raise SiteError('현재 보안 확인 대기 중인 작업이 없습니다.')
             self.resume_signal.set()
 
-    def read_page(self, client, path):
+    def read_page(self, client, path, catalog=False):
         resumed, announced = False, False
         while True:
             self.stop_check()
             client.check()
             try:
                 html = client.continue_html(path) if resumed else client.html(path)
+                if catalog and isinstance(client, BrowserClient):
+                    html = client.wait_catalog(path, html)
                 client.keep_tab = False
                 return html
             except Blocked as exc:
@@ -403,8 +405,8 @@ class Engine:
             kind = '안내된 새 주소' if candidate in modern else '현재 새 주소' if candidate == old else '기본 새 주소'
             self.update(message=kind + ' 작품 목록 확인: ' + candidate)
             try:
-                html = self.read_page(client, '/novel/' + nid)
-                book = parse_catalog(html, candidate + '/novel/' + nid)
+                html = self.read_page(client, '/novel/' + nid, catalog=True)
+                book = parse_catalog(html, client.base + '/novel/' + nid)
                 if expected_title != '분석 전' and book['title'] != expected_title:
                     raise SiteError('같은 작품 번호의 제목이 기존 작품과 다릅니다. 주소를 적용하지 않습니다.')
             except Cancelled:
@@ -419,6 +421,9 @@ class Engine:
                 attempts.append({'url': candidate, 'kind': kind, 'status': exc.code, 'message': str(exc)})
                 errors.append(exc)
                 self.update(domain_attempts=attempts)
+                if isinstance(exc, CatalogStructureError):
+                    client.base = old
+                    raise
                 continue
             except Exception as exc:
                 error = SiteError('주소 접속 실패: ' + type(exc).__name__)
@@ -426,17 +431,18 @@ class Engine:
                 errors.append(error)
                 self.update(domain_attempts=attempts)
                 continue
-            attempts.append({'url': candidate, 'kind': kind, 'status': 'completed', 'message': '작품 목록 정상 확인'})
-            self.update(domain_attempts=attempts, base_url=candidate)
-            if candidate != old:
+            final_base = client.base
+            attempts.append({'url': candidate, 'kind': kind, 'status': 'completed', 'message': '작품 목록 정상 확인' + (' · 이동 주소 ' + final_base if candidate != final_base else '')})
+            self.update(domain_attempts=attempts, base_url=final_base)
+            if final_base != old:
                 try:
                     save = config.get('save_domain')
                     if save:
-                        save(candidate)
+                        save(final_base)
                 except Exception:
                     client.base = old
                     raise
-                self.update(domain_change={'old': old, 'new': candidate, 'time': now()})
+                self.update(domain_change={'old': old, 'new': final_base, 'time': now()})
             return html
         client.base = old
         detail = '\n'.join(x['kind'] + ' ' + x['url'] + ': ' + x['message'] for x in attempts)
@@ -485,7 +491,7 @@ class Engine:
                     if kind == 'download' and batch_count >= batch_size:
                         self.batch_rest(batch_pause)
                         batch_count = 0
-                    book = collect_catalog(client, nid, self.update, lambda path: self.read_page(client, path), first_html)
+                    book = collect_catalog(client, nid, self.update, lambda path: self.read_page(client, path, catalog=True), first_html)
                     first_html = None
                     self.history.cache_catalog(book)
                     try:

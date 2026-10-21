@@ -52,10 +52,21 @@ class Domains(unittest.TestCase):
         self.assertEqual(self.calls,['https://toki34.com'])
         self.assertEqual(self.saved,['https://toki34.com'])
 
+    def test_validated_redirect_destination_is_saved_instead_of_stale_announcement(self):
+        def redirected(path):
+            self.calls.append(self.client.base)
+            self.client.base='https://toki35.com'
+            return catalog([1])
+        self.client.html=redirected
+        self.resolve()
+        self.assertEqual(self.saved,['https://toki35.com'])
+        self.assertEqual(self.engine.snapshot()['base_url'],'https://toki35.com')
+        self.assertEqual(self.engine.snapshot()['domain_change']['new'],'https://toki35.com')
+
     def test_challenge_never_applied_and_previous_address_kept(self):
         self.outcomes={k:SiteError('접속 실패') for k in ('https://newtoki1.org','https://newtoki2.org')}
         self.outcomes['https://toki34.com']=Blocked('사람 확인 필요')
-        with patch.object(self.engine,'read_page',side_effect=lambda client,path:client.html(path)):
+        with patch.object(self.engine,'read_page',side_effect=lambda client,path,**kw:client.html(path)):
             with self.assertRaisesRegex(Blocked,'사람 확인'):self.resolve()
         self.assertEqual(self.calls,['https://toki34.com'])
         self.assertEqual(self.client.base,'https://newtoki1.org')

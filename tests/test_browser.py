@@ -45,4 +45,28 @@ class BrowserTests(unittest.TestCase):
         with self.assertRaises(Blocked):c.continue_html('/novel/123')
 
 
+    def test_modern_redirect_accepts_only_same_work_and_query(self):
+        c=BrowserClient('https://toki34.com','http://127.0.0.1:9222')
+        c.accept_location('https://toki35.com/novel/123?epage=2','/novel/123?epage=2')
+        self.assertEqual(c.base,'https://toki35.com')
+        for target in ('https://toki36.com/novel/456?epage=2','https://toki36.com/novel/123?epage=3','https://newtoki1.org/novel/123?epage=2','https://evil.example/novel/123?epage=2'):
+            with self.subTest(target=target),self.assertRaises(SiteError):
+                c.accept_location(target,'/novel/123?epage=2')
+            self.assertEqual(c.base,'https://toki35.com')
+
+    def test_catalog_wait_reads_rendered_dom_without_new_navigation(self):
+        from unittest.mock import Mock
+        from test_core import catalog
+        c=BrowserClient('https://toki35.com','http://127.0.0.1:9222')
+        c.continue_html=Mock(return_value=catalog([1]));c.stop.wait=Mock(return_value=False)
+        self.assertEqual(c.wait_catalog('/novel/123','<title>loading</title>'),catalog([1]))
+        c.continue_html.assert_called_once_with('/novel/123')
+
+    def test_unknown_catalog_structure_keeps_tab_and_requests_html(self):
+        c=BrowserClient('https://toki35.com','http://127.0.0.1:9222');c.timeout=1
+        with patch('browser_client.time.monotonic',side_effect=[0,2]):
+            with self.assertRaisesRegex(SiteError,'HTML 파일'):
+                c.wait_catalog('/novel/123','<h1>unknown modern markup</h1>')
+        self.assertTrue(c.keep_tab)
+
 if __name__=='__main__':unittest.main()
