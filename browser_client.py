@@ -368,7 +368,7 @@ class BrowserClient:
             html = self.evaluate("document.documentElement ? document.documentElement.outerHTML : ''") or ''
             if not html:
                 raise Pending('현재 작업 탭의 문서가 아직 준비되지 않았습니다.')
-        meta = viewer_config(html, nid, item['id'])
+        meta = viewer_config(html, nid, item['id'], expected_no=item['no'])
         if int(meta.get('no') or 0) != int(item['no']):
             raise SiteError('목록과 본문의 회차 번호가 다릅니다.')
         deadline = time.monotonic() + self.timeout

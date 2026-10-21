@@ -25,6 +25,20 @@ def closed_tree():
     ]))]}
 
 class ModernViewer(unittest.TestCase):
+    def test_title_only_heading_uses_catalog_number_after_exact_episode_id_check(self):
+        html=viewer().replace('1화','언제 세상이 망한다고?')
+        meta=viewer_config(html,'123','1001',expected_no=1)
+        self.assertEqual((meta['no'],meta['number_source']),(1,'catalog'))
+        with self.assertRaises(SiteError):viewer_config(html,'123','1002',expected_no=1)
+        for invalid in (None,0,-1,True,'1'):
+            with self.assertRaises(SiteError):viewer_config(html,'123','1001',expected_no=invalid)
+
+    def test_title_only_episode_can_read_body_without_relaxing_url_checks(self):
+        c=BrowserClient(BASE,'http://127.0.0.1:9222')
+        c.evaluate=Mock(side_effect=[URL,URL,{'title':'테스트','message':'','locked':False},URL])
+        c.call=Mock(side_effect=[{'root':{'nodeId':1}},{'nodeId':2},{'node':closed_tree()}])
+        self.assertEqual(c.displayed_body('123',dict(id='1001',no=1),viewer().replace('1화','숫자 없는 회차 제목')),TEXT)
+
     def test_bare_number_heading_and_puzzle_gate_before_metadata(self):
         html=viewer(278,'57318','8376236').replace('278화','278')
         self.assertEqual(viewer_config(html,'57318','8376236')['no'],278)

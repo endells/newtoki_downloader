@@ -262,7 +262,7 @@ def parse_modern_catalog(doc, url):
                 episodes=episodes,pages=[1],has_older=older,has_newer=newer,has_more=(older or newer) and (total is None or len(episodes)<int(total[1])),total_episodes=int(total[1]) if total else None)
 
 
-def viewer_config(html, nid, eid):
+def viewer_config(html, nid, eid, expected_no=None):
     doc = check_page(html)
     node = next((x for x in doc.walk(tag='script') if x.attrs.get('id') == 'theme-novel-viewer-data'), None)
     if not node:
@@ -275,7 +275,11 @@ def viewer_config(html, nid, eid):
                 raise SiteError('요청한 회차와 새 뷰어의 회차 ID가 다릅니다.')
             number = re.fullmatch(r'([0-9]+)\s*(?:화|회)?', clean(header.text()))
             if not number:
-                raise SiteError('새 뷰어의 회차 번호를 확인하지 못했습니다.')
+                # The modern heading can be an episode title rather than a number.
+                # The canonical work/episode path above and live URL checks bind it to the catalog.
+                if expected_no is None or not isinstance(expected_no, int) or isinstance(expected_no, bool) or expected_no < 1:
+                    raise SiteError('제목에 회차 번호가 없습니다. 검증된 목록의 회차 번호가 필요합니다.')
+                return dict(id=str(eid), no=expected_no, title=clean(header.text()), format='modern', number_source='catalog')
             return dict(id=str(eid), no=int(number[1]), title=clean(header.text()), format='modern')
         raise SiteError('회차 뷰어 정보를 찾을 수 없습니다.')
     try:
