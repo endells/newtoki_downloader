@@ -384,7 +384,7 @@ class Engine:
 
     def resolve(self, client, nid, config):
         old = client.base
-        self.update(message='안내 사이트에서 새 주소 확인 중')
+        self.update(message='안내 사이트에서 구 주소 확인 중')
         warning = ''
         try:
             html, source = fetch_announcement(config.get('announcement_url', ANNOUNCEMENT), client.check)
@@ -396,15 +396,15 @@ class Engine:
             legacy, modern = [], []
             warning = str(exc) + ' 현재 저장 주소의 작품 목록을 확인합니다.'
             self.update(warnings=True, last_warning=warning)
-        # The user selected the modern site. Never rotate into legacy domains on a gate.
-        current = old if urlsplit(old).hostname.startswith('toki') else DEFAULT_BASE
-        candidates = list(dict.fromkeys(([current] + modern) if current == old else (modern + [current])))
+        # Legacy-only build: never rotate into modern domains on a gate.
+        current = old if urlsplit(old).hostname.startswith('newtoki') else DEFAULT_BASE
+        candidates = list(dict.fromkeys(([current] + legacy) if current == old else (legacy + [current])))
         attempts, errors = [], []
         expected_title = self.book_info(nid)['title']
         for candidate in candidates:
             client.check()
             client.base = candidate
-            kind = '안내된 새 주소' if candidate in modern else '현재 새 주소' if candidate == old else '기본 새 주소'
+            kind = '안내된 구 주소' if candidate in legacy else '현재 구 주소' if candidate == old else '기본 구 주소'
             self.update(message=kind + ' 작품 목록 확인: ' + candidate)
             try:
                 html = self.read_page(client, '/novel/' + nid, catalog=True)

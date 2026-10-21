@@ -60,7 +60,7 @@
 @media(max-width:650px){.nt-grid{grid-template-columns:1fr}.nt-card{padding:12px}.nt{padding:12px 8px}.nt .nt-scroll table td,.nt .nt-scroll table th{padding:7px;font-size:12px}}
 </style>
 <main class="nt">
-<h3>북토끼 소설 다운 <span class="badge">v0.2.21 · 테스트</span></h3>
+<h3>북토끼 소설 다운 · 구주소 <span class="badge">v0.2.21 · 테스트</span></h3>
 <section class="nt-status" aria-label="작업 상태">
  <div class="nt-row"><strong>작업 상태</strong><span id="state" class="nt-state" role="status">확인 중</span><button id="resume" class="primary" hidden>확인 후 계속</button><button id="stop" disabled>중지</button></div>
  <div id="verification-help" class="nt-note" hidden></div><div id="counts"></div><progress id="progress" value="0" max="1"></progress><div id="error" class="nt-error"></div><div id="domain-change"></div><div id="domain-attempts" class="nt-msg"></div>
@@ -110,13 +110,13 @@
 <section class="nt-card"><h3>사이트 / 브라우저 연결 · 도메인 갱신</h3>
 <p class="nt-note">이 사이트는 본문을 브라우저에서 별도로 표시합니다. 먼저 README의 전용 브라우저를 설치하세요. 보안 확인은 그 브라우저에서 직접 처리하며, 로그인·포인트 구매 버튼은 자동으로 누르지 않습니다.</p>
 <div class="nt-grid">
-<div><label for="base_url">현재 기본 주소 (새 주소 사용)</label><input id="base_url" type="text" value="{{ config.base_url }}" placeholder="https://toki35.com"></div>
+<div><label for="base_url">현재 기본 주소 (구주소 전용)</label><input id="base_url" type="text" value="{{ config.base_url }}" placeholder="https://newtoki1.org"></div>
 <div><label for="browser_url">전용 브라우저 연결 주소</label><input id="browser_url" type="text" value="{{ config.browser_url }}"><small>동일 Docker 네트워크: http://newtoki-browser:9223</small></div>
 </div>
 <label for="announcement_url">도메인 주소 안내 사이트</label><input id="announcement_url" type="text" value="{{ config.announcement_url }}" placeholder="https://뉴토주소.com/">
-<small>현재 저장된 새 주소를 먼저 확인하고 접속 오류가 있을 때 안내된 새 주소를 확인합니다. 기존 주소가 구 주소이면 안내된 새 주소와 기본 새 주소 https://toki35.com을 사용합니다. 정상 목록과 기존 작품 제목을 확인한 뒤 주소를 저장하며 상태에는 실제 접속 주소를 표시합니다. 사람 확인·퍼즐은 전용 브라우저의 현재 작업 탭에서 직접 처리하고 ‘확인 후 계속’을 누르세요. 보안 확인이 뜨면 다른 도메인을 시도하지 않고 대기합니다.</small>
+<small>구주소 전용 버전입니다. 현재 저장된 newtoki 주소를 먼저 확인하고 안내 사이트에서도 구주소 후보만 확인합니다. 신주소로 자동 전환하지 않습니다. 인증이나 이용 제한이 나타나면 직접 확인할 때까지 대기합니다.</small>
 
-<label class="nt-check"><input id="auto_domain" type="checkbox" {% if config.auto_domain %}checked{% endif %}>작업 시작 시 새 도메인 자동 확인</label>
+<label class="nt-check"><input id="auto_domain" type="checkbox" {% if config.auto_domain %}checked{% endif %}>작업 시작 시 구 도메인 자동 확인</label>
 <div class="nt-actions"><button id="save-connection" class="primary">연결 / 도메인 설정 저장</button></div>
 <small>이 영역은 기본 설정과 별도로 저장합니다. 저장만으로 접속 확인이나 다운로드를 시작하지 않습니다.</small>
 <label for="probe">도메인 확인에 사용할 작품 번호</label><input id="probe" type="text" value="58035">
@@ -130,7 +130,7 @@
 <label>채널 ID 또는 @채널사용자명</label><input id="tg-channel" type="text">
 <div class="nt-actions"><button id="tg-save">텔레그램 설정 저장</button><button id="tg-check">연결 확인</button><button id="tg-poll">링크 지금 확인</button></div><p id="tg-state"></p>
 <small>① BotFather에서 전용 봇 생성 → ② 수신할 채널에 봇을 관리자로 추가 → ③ 토큰과 채널 ID 저장 → ④ 새 작품 링크 게시. 일반 메시지·캡션·숨겨진 링크에서 작품 번호를 추출하며 중복 등록하지 않습니다. 기존 게시물을 일괄 탐색하지 않습니다. 다른 프로그램과 같은 봇을 공유하지 마세요. 수신은 목록만 추가하며 다운로드 예약은 기본 설정에서 별도로 켭니다.</small></section>
-<section class="nt-card"><h3>북토끼 알리미 · Discord</h3><label class="nt-check"><input id="dc-enabled" type="checkbox">알림 사용</label>
+<section class="nt-card"><h3>북토끼 알리미 · 구주소 · Discord</h3><label class="nt-check"><input id="dc-enabled" type="checkbox">알림 사용</label>
 <label>채널 웹훅 URL</label><input id="dc-url" type="password" autocomplete="new-password" placeholder="빈칸은 기존 웹훅 유지"><small id="dc-saved"></small><label class="nt-check"><input id="dc-clear" type="checkbox">웹훅 삭제</label>
 <div class="nt-actions"><button id="dc-save">알림 설정 저장</button><button id="dc-test">테스트 알림</button></div>
 <small>Discord 채널 설정 → 연동 → 웹후크 → 웹후크 URL 복사. 수동·예약 수집의 작품명, 회차 번호 범위, 결과, 오류와 도메인 변경 주소를 전송합니다. 회차 제목은 제외하며 연속 회차는 0001-0100, 떨어진 회차는 콤마로 구분합니다. 새 다운로드도 변경도 없는 정상 작업은 알림을 생략합니다.</small></section>

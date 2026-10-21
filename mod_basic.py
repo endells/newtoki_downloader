@@ -35,18 +35,18 @@ class ModuleBasic(PluginModuleBase):
         directory = Path(F.config['path_data']) / 'db'
         self.telegram = TelegramFeed(directory)
         self.telegram_lock = threading.Lock()
-        self.activity = ActivityLog(directory / 'newtoki_downloader_activity.db')
+        self.activity = ActivityLog(directory / 'newtoki_downloader_legacy_activity.db')
         self.discord = DiscordNotifier(directory)
 
     def plugin_load(self):
         if not self.P.ModelSetting.get('download_path'):
-            self.P.ModelSetting.set('download_path', os.path.join(F.config['path_data'], 'downloads', 'newtoki'))
+            self.P.ModelSetting.set('download_path', os.path.join(F.config['path_data'], 'downloads', 'newtoki_legacy'))
         self._engine()
         self.sync_schedule(self.config())
         self.sync_telegram_schedule()
         if hasattr(self.P.logger, 'addHandler') and self.activity not in self.P.logger.handlers:
             self.P.logger.addHandler(self.activity)
-        self.record_event('INFO', '북토끼 소설 다운 시작 · 로그 활성화')
+        self.record_event('INFO', '북토끼 소설 다운 · 구주소 시작 · 로그 활성화')
 
     def record_event(self, level, message):
         from .notifications import redact
@@ -56,13 +56,15 @@ class ModuleBasic(PluginModuleBase):
 
     def _engine(self):
         if self.engine is None:
-            self.engine = Engine(os.path.join(F.config['path_data'], 'db', 'newtoki_downloader_history.db'))
+            self.engine = Engine(os.path.join(F.config['path_data'], 'db', 'newtoki_downloader_legacy_history.db'))
         return self.engine
 
     @staticmethod
     def validate(raw):
         conf = dict(raw)
         conf['base_url'] = origin(conf['base_url'])
+        if not urlsplit(conf['base_url']).hostname.startswith('newtoki'):
+            raise SiteError('구주소 전용 버전에는 newtoki숫자 형식의 주소를 입력하세요.')
         conf['announcement_url'] = announcement_url(conf.get('announcement_url', DEFAULT_ANNOUNCEMENT))
         u = urlsplit(conf['browser_url'])
         if u.scheme not in ('http', 'https') or not u.hostname or u.username or u.password or u.path not in ('', '/') or u.query or u.fragment:
@@ -91,7 +93,7 @@ class ModuleBasic(PluginModuleBase):
 
     def config(self):
         raw = {k: self.P.ModelSetting.get(k) or v for k, v in self.db_default.items()}
-        raw['download_path'] = raw['download_path'] or os.path.join(F.config['path_data'], 'downloads', 'newtoki')
+        raw['download_path'] = raw['download_path'] or os.path.join(F.config['path_data'], 'downloads', 'newtoki_legacy')
         return self.validate(raw)
 
     def save_domain(self, value):
@@ -166,7 +168,7 @@ class ModuleBasic(PluginModuleBase):
             return '다른 수신 작업이 진행 중입니다.'
         try:
             self.telegram.directory.mkdir(parents=True, exist_ok=True)
-            with open(self.telegram.directory / 'newtoki_downloader_telegram.lock', 'a') as handle:
+            with open(self.telegram.directory / 'newtoki_downloader_legacy_telegram.lock', 'a') as handle:
                 try:
                     fcntl.flock(handle.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
                 except BlockingIOError:
@@ -201,14 +203,14 @@ class ModuleBasic(PluginModuleBase):
             page = 'activity'
         if page not in ('setting', 'manual', 'history', 'integration', 'activity', 'files'):
             page = 'setting'
-        if 'newtoki_csrf' not in session:
-            session['newtoki_csrf'] = secrets.token_urlsafe(32)
-        return render_template('newtoki_basic.html', package_name=self.P.package_name, page=page,
-                               config=self.config(), csrf_token=session['newtoki_csrf'])
+        if 'newtoki_legacy_csrf' not in session:
+            session['newtoki_legacy_csrf'] = secrets.token_urlsafe(32)
+        return render_template('newtoki_legacy_basic.html', package_name=self.P.package_name, page=page,
+                               config=self.config(), csrf_token=session['newtoki_legacy_csrf'])
 
     def process_command(self, command, arg1, arg2, arg3, req):
         try:
-            expected = session.get('newtoki_csrf', '')
+            expected = session.get('newtoki_legacy_csrf', '')
             if not expected or not secrets.compare_digest(expected, req.form.get('csrf_token', '')):
                 return jsonify(ret='error', msg='페이지를 새로고침하세요.'), 403
             engine = self._engine()

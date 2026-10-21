@@ -14,7 +14,7 @@ except ImportError:
     from browser_client import NoRedirect
 
 DEFAULT_ANNOUNCEMENT = 'https://xn--vg1b79zgsf1sj.com/'
-DEFAULT_BASE = 'https://toki35.com'
+DEFAULT_BASE = 'https://newtoki1.org'
 
 
 def announcement_url(value):

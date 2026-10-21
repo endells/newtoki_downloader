@@ -36,8 +36,8 @@ class FFTests(unittest.TestCase):
         framework.Job=Job
         plugin=types.ModuleType('plugin');plugin.PluginModuleBase=Base
         sys.modules['framework']=framework;sys.modules['plugin']=plugin
-        sys.modules.pop('newtoki_downloader.mod_basic',None)
-        from newtoki_downloader.mod_basic import ModuleBasic
+        sys.modules.pop('newtoki_downloader_legacy.mod_basic',None)
+        from newtoki_downloader_legacy.mod_basic import ModuleBasic
         class Settings:
             data=dict(ModuleBasic.db_default)
             @classmethod
@@ -45,7 +45,7 @@ class FFTests(unittest.TestCase):
             @classmethod
             def set(cls,key,value):cls.data[key]=value
         self.settings=Settings
-        self.module=ModuleBasic(types.SimpleNamespace(ModelSetting=Settings,package_name='newtoki_downloader',logger=self.app.logger))
+        self.module=ModuleBasic(types.SimpleNamespace(ModelSetting=Settings,package_name='newtoki_downloader_legacy',logger=self.app.logger))
         self.module.plugin_load()
         self.addCleanup(self.module.plugin_unload)
         self.scheduler=framework.F.scheduler
@@ -56,14 +56,14 @@ class FFTests(unittest.TestCase):
         for page in ('setting','manual','history','integration','activity','files'):
             with self.app.test_request_context('/'):
                 output=self.module.process_menu(page,None)
-                self.assertIn('newtoki_downloader/ajax/basic/command',output)
+                self.assertIn('newtoki_downloader_legacy/ajax/basic/command',output)
                 self.assertIn('csrf_token',output)
                 self.assertNotIn('{% ',output)
 
     def test_save_never_runs_job(self):
         from flask import session,request
         with self.app.test_request_context('/',method='POST',data={'csrf_token':'abc'}):
-            session['newtoki_csrf']='abc'
+            session['newtoki_legacy_csrf']='abc'
             conf=self.module.config();conf['basic_auto_start']=True
             response=self.module.process_command('save',json.dumps(conf),'','',request)
             self.assertEqual(response.get_json()['ret'],'success')
@@ -85,7 +85,7 @@ class FFTests(unittest.TestCase):
     def send(self, command, data=''):
         from flask import session, request
         with self.app.test_request_context('/',method='POST',data={'csrf_token':'abc'}):
-            session['newtoki_csrf']='abc'
+            session['newtoki_legacy_csrf']='abc'
             return self.module.process_command(command,data,'','',request).get_json()
 
     def test_integration_schedule_no_download(self):
@@ -118,7 +118,7 @@ class FFTests(unittest.TestCase):
 
     def test_failed_analysis_records_details_without_downloading(self):
         from unittest.mock import Mock
-        from newtoki_downloader.parser import SiteError
+        from newtoki_downloader_legacy.parser import SiteError
         class BrokenBrowser:
             base='https://newtoki1.org'
             def check(self):pass

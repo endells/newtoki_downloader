@@ -45,8 +45,8 @@ def extract_ids(message):
 class TelegramFeed:
     def __init__(self, directory, api=None):
         self.directory = Path(directory)
-        self.settings_path = self.directory / 'newtoki_downloader_telegram.json'
-        self.state_path = self.directory / 'newtoki_downloader_telegram_state.json'
+        self.settings_path = self.directory / 'newtoki_downloader_legacy_telegram.json'
+        self.state_path = self.directory / 'newtoki_downloader_legacy_telegram_state.json'
         self.api = api or self.request
 
     def settings(self):

@@ -1,6 +1,6 @@
-package_name: newtoki_downloader
-title: 북토끼 소설 다운
-description: 새 주소 · 전용 브라우저의 공개 텍스트 회차 저장
+package_name: newtoki_downloader_legacy
+title: 북토끼 소설 다운 · 구주소
+description: 구주소 전용 · 독립 설정 및 저장 이력
 version: 0.2.21
 developer: endells
-home: https://github.com/endells/newtoki_downloader
+home: https://github.com/endells/newtoki_downloader/tree/legacy

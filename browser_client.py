@@ -203,7 +203,7 @@ class BrowserClient:
         actual_base = origin(actual)
         current, expected = urlsplit(actual), urlsplit(self.base + path)
         if actual_base != self.base:
-            modern = lambda host: bool(re.fullmatch(r'toki[0-9]+\.(?:com|org|net)', host or ''))
+            modern = lambda host: bool(re.fullmatch(r'newtoki[0-9]+\.(?:com|org|net)', host or ''))
             if not (modern(current.hostname) and modern(expected.hostname)
                     and current.path == expected.path and current.query == expected.query):
                 raise SiteError('다른 도메인 또는 작품 경로로 이동했습니다. 주소를 적용하지 않습니다.')

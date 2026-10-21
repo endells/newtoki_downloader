@@ -101,7 +101,7 @@ def notification_time(value=None):
 def summary_messages(report):
     state = report['state']
     source = report.get('source', '수동 다운로드')
-    lines = ['북토끼 알리미 · ' + source,
+    lines = ['북토끼 알리미 · 구주소 · ' + source,
              '결과: %s | 완료 %s · 실패 %s · 건너뜀 %s' % (
                  {'completed': '완료', 'failed': '오류', 'auth_required': '로그인 필요', 'verification_waiting': '보안 확인 대기', 'verification_required': '보안 확인 필요', 'locked': '잠금 회차', 'body_pending': '본문 대기', 'canceled': '중지'}.get(state['status'], state['status']),
                  state.get('completed', 0), state.get('failed', 0), state.get('skipped', 0))]
@@ -130,7 +130,7 @@ def summary_messages(report):
         line = line[:900]
         if len((current + '\n' + line).encode('utf-16-le')) // 2 > 1850:
             messages.append(current)
-            current = '북토끼 알리미 · 계속\n'
+            current = '북토끼 알리미 · 구주소 · 계속\n'
         current += line + '\n'
     if current:
         messages.append(current)
@@ -139,7 +139,7 @@ def summary_messages(report):
 
 class DiscordNotifier:
     def __init__(self, directory, sender=None):
-        self.path = Path(directory) / 'newtoki_downloader_discord.json'
+        self.path = Path(directory) / 'newtoki_downloader_legacy_discord.json'
         self.sender = sender or self.send
         self.lock = threading.RLock()
 
@@ -168,7 +168,7 @@ class DiscordNotifier:
     @staticmethod
     def send(url, content):
         url = webhook_url(url)
-        payload = {'username': '북토끼 알리미', 'content': content, 'allowed_mentions': {'parse': []}}
+        payload = {'username': '북토끼 알리미 · 구주소', 'content': content, 'allowed_mentions': {'parse': []}}
         request = urllib.request.Request(url + '?wait=true', data=json.dumps(payload).encode('utf-8'),
                                          headers={'Content-Type': 'application/json', 'User-Agent': 'NewtokiFF/0.5'})
         for attempt in range(2):
@@ -208,4 +208,4 @@ class DiscordNotifier:
         conf = self.settings()
         if not conf['url']:
             raise MunpiaError('웹훅 URL을 먼저 저장하세요.')
-        self.sender(conf['url'], '북토끼 알리미 · 테스트 알림\n다운로드 결과가 이 채널로 전송됩니다.')
+        self.sender(conf['url'], '북토끼 알리미 · 구주소 · 테스트 알림\n다운로드 결과가 이 채널로 전송됩니다.')

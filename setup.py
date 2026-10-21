@@ -3,7 +3,7 @@ from plugin import create_plugin_instance
 setting = {
     'filepath': __file__, 'use_db': True, 'use_default_setting': True,
     'home_module': 'basic', 'setting_menu': None, 'default_route': 'normal',
-    'menu': {'uri': __package__, 'name': '북토끼 소설 다운', 'list': [
+    'menu': {'uri': __package__, 'name': '북토끼 소설 다운 · 구주소', 'list': [
         {'uri': 'basic/setting', 'name': '설정'},
         {'uri': 'basic/manual', 'name': '수동 다운로드'},
         {'uri': 'basic/integration', 'name': '연동 / 알림'},
