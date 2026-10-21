@@ -15,12 +15,12 @@ from .engine import Engine
 from .telegram_feed import TelegramFeed
 from .notifications import ActivityLog, DiscordNotifier
 from .storage import browse_folders, check_storage
-from .domain import announcement_url, DEFAULT_ANNOUNCEMENT
+from .domain import announcement_url, DEFAULT_ANNOUNCEMENT, DEFAULT_BASE
 
 
 class ModuleBasic(PluginModuleBase):
     db_default = {
-        'announcement_url': DEFAULT_ANNOUNCEMENT, 'base_url': 'https://newtoki1.org', 'browser_url': 'http://newtoki-browser:9223',
+        'announcement_url': DEFAULT_ANNOUNCEMENT, 'base_url': DEFAULT_BASE, 'browser_url': 'http://newtoki-browser:9223',
         'download_path': '', 'titles': '', 'request_delay': '3', 'timeout': '30',
         'batch_size': '10', 'batch_pause': '60',
         'episode_digits': '4', 'max_per_title': '10', 'make_epub': 'True',
@@ -98,7 +98,7 @@ class ModuleBasic(PluginModuleBase):
         with F.app.app_context(), self.settings_lock:
             old = self.P.ModelSetting.get('base_url')
             self.P.ModelSetting.set('base_url', value)
-            self.P.logger.info('구버전 도메인 변경: %s -> %s', old, value)
+            self.P.logger.info('도메인 변경: %s -> %s', old, value)
 
     def runtime(self):
         conf = self.config()
@@ -120,7 +120,7 @@ class ModuleBasic(PluginModuleBase):
             self.activity.add('INFO', '%s [%s] / %s. %s 저장 완료' % (item['title'], item['novel_id'], item['no'], item['episode_title']))
         if state.get('domain_change'):
             change = state['domain_change']
-            self.activity.add('INFO', '구버전 도메인 변경: ' + change['old'] + ' → ' + change['new'])
+            self.activity.add('INFO', '도메인 변경: ' + change['old'] + ' → ' + change['new'])
         if state.get('last_error'):
             self.activity.add('ERROR', state['last_error'])
         if state.get('last_warning'):

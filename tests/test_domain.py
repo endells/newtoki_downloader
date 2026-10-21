@@ -33,61 +33,67 @@ class Domains(unittest.TestCase):
 
     def resolve(self):self.engine.resolve(self.client,'123',self.conf)
 
-    def test_legacy_first_and_stop_without_visiting_modern(self):
+    def test_modern_first_without_visiting_legacy(self):
         self.resolve()
-        self.assertEqual(self.calls,['https://newtoki2.org'])
-        self.assertEqual(self.saved,['https://newtoki2.org'])
+        self.assertEqual(self.calls,['https://toki34.com'])
+        self.assertEqual(self.saved,['https://toki34.com'])
         self.assertEqual(self.engine.snapshot()['domain_change']['old'],'https://newtoki1.org')
 
-    def test_working_current_preserved_before_modern(self):
-        self.outcomes['https://newtoki2.org']=SiteError('접속 실패')
+    def test_current_modern_used_when_announced_modern_is_unavailable(self):
+        self.client.base='https://toki35.com'
+        self.outcomes['https://toki34.com']=SiteError('접속 실패')
         self.resolve()
-        self.assertEqual(self.calls,['https://newtoki2.org','https://newtoki1.org'])
+        self.assertEqual(self.calls,['https://toki34.com','https://toki35.com'])
         self.assertEqual(self.saved,[])
 
-    def test_modern_used_only_after_all_legacy_and_current_fail(self):
+    def test_legacy_errors_do_not_affect_modern_selection(self):
         self.outcomes={k:SiteError('접속 실패') for k in ('https://newtoki1.org','https://newtoki2.org')}
         self.resolve()
-        self.assertEqual(self.calls,['https://newtoki2.org','https://newtoki1.org','https://toki34.com'])
+        self.assertEqual(self.calls,['https://toki34.com'])
         self.assertEqual(self.saved,['https://toki34.com'])
 
     def test_challenge_never_applied_and_previous_address_kept(self):
         self.outcomes={k:SiteError('접속 실패') for k in ('https://newtoki1.org','https://newtoki2.org')}
         self.outcomes['https://toki34.com']=Blocked('사람 확인 필요')
-        with self.assertRaisesRegex(Blocked,'사람 확인'):self.resolve()
+        with patch.object(self.engine,'read_page',side_effect=lambda client,path:client.html(path)):
+            with self.assertRaisesRegex(Blocked,'사람 확인'):self.resolve()
+        self.assertEqual(self.calls,['https://toki34.com'])
         self.assertEqual(self.client.base,'https://newtoki1.org')
         self.assertEqual(self.saved,[])
         self.assertEqual(self.engine.snapshot()['domain_attempts'][-1]['status'],'verification_required')
 
     def test_same_id_wrong_title_not_applied(self):
         self.engine.history.query('INSERT INTO books VALUES (?,?,?,?)',('123','테스트 작품','','now'))
-        self.outcomes['https://newtoki2.org']=catalog([1],title='다른 작품')
+        self.outcomes['https://toki34.com']=catalog([1],title='다른 작품')
+        self.client.base='https://toki35.com'
         self.resolve()
         self.assertEqual(self.saved,[])
         self.assertEqual(len(self.calls),2)
 
     def test_cancel_does_not_try_other_domains(self):
-        self.outcomes['https://newtoki2.org']=Cancelled('중지')
+        self.outcomes['https://toki34.com']=Cancelled('중지')
         with self.assertRaises(Cancelled):self.resolve()
         self.assertEqual(len(self.calls),1)
         self.assertEqual(self.saved,[])
 
     def test_announcement_failure_keeps_working_current(self):
         self.fetch.side_effect=SiteError('안내 사이트 오류')
+        self.client.base='https://toki35.com'
         self.resolve()
-        self.assertEqual(self.calls,['https://newtoki1.org'])
+        self.assertEqual(self.calls,['https://toki35.com'])
         self.assertTrue(self.engine.snapshot()['warnings'])
         self.assertEqual(self.saved,[])
 
     def test_duplicate_candidates_only_checked_once(self):
-        self.fetch.return_value=(SOURCE.replace('newtoki2.org','newtoki1.org'),DEFAULT_ANNOUNCEMENT)
-        self.outcomes['https://newtoki1.org']=SiteError('오류')
+        self.client.base='https://toki34.com'
+        self.fetch.return_value=(SOURCE+SOURCE,DEFAULT_ANNOUNCEMENT)
         self.resolve()
-        self.assertEqual(self.calls,['https://newtoki1.org','https://toki34.com'])
+        self.assertEqual(self.calls,['https://toki34.com'])
 
     def test_incompatible_modern_html_not_saved(self):
         self.outcomes={k:SiteError('실패') for k in ('https://newtoki1.org','https://newtoki2.org')}
         self.outcomes['https://toki34.com']='<title>다른 구조</title>'
+        self.outcomes['https://toki35.com']='<title>다른 구조</title>'
         with self.assertRaises(SiteError):self.resolve()
         self.assertEqual(self.saved,[])
 

@@ -103,6 +103,32 @@ class PauseResume(unittest.TestCase):
         self.assertEqual(state['completed'],25)
         self.assertEqual(counts,[(60,10),(60,20)])
 
+    def test_modern_catalog_challenge_waits_and_resumes_same_tab_before_saving_domain(self):
+        class C(fixtures.FakeClient):
+            def __init__(self,*args):super().__init__(*args);self.opens=[];self.reads=0
+            def html(self,path):
+                self.opens.append((self.base,path))
+                if len(self.opens)==1:raise Blocked('Cloudflare 사람 확인')
+                return fixtures.catalog([1])
+            def continue_html(self,path):
+                self.reads+=1
+                return fixtures.catalog([1])
+        c=C(fixtures.BASE);self.engine.factory=lambda *args:c
+        saved=[];alerts=[]
+        self.config.update(auto_domain=True,save_domain=saved.append,on_verification=alerts.append)
+        with patch('engine.fetch_announcement',return_value=('<a href="https://toki35.com">신버전 바로가기</a><a href="https://newtoki2.org">구버전 바로가기</a>','https://notice.example/')):
+            self.engine.start('analyze',['123'],self.config)
+            self.addCleanup(lambda:(self.engine.cancel(),self.engine.thread.join(2)))
+            self.wait(lambda:self.engine.snapshot()['status']=='verification_waiting')
+            self.assertEqual(saved,[]);self.assertEqual(c.opens,[('https://toki35.com','/novel/123')])
+            self.assertEqual(c.reads,0)
+            self.assertEqual(self.engine.snapshot()['verification_url'],'https://toki35.com/novel/123')
+            self.engine.resume();self.engine.thread.join(3)
+        self.assertEqual(self.engine.snapshot()['status'],'completed',self.engine.snapshot())
+        self.assertEqual(saved,['https://toki35.com']);self.assertEqual(c.reads,1)
+        self.assertEqual(len(c.opens),1,'confirmed first catalog must not be navigated again')
+        self.assertTrue(all(base=='https://toki35.com' for base,path in c.opens))
+
     def test_cancel_during_rest_sends_no_more_requests(self):
         c=fixtures.FakeClient(fixtures.BASE);self.engine.factory=lambda *args:c
         self.config.update(batch_size=1,batch_pause=60)

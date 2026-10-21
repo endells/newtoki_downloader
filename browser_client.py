@@ -178,6 +178,24 @@ class BrowserClient:
             self.stop.wait(0.3)
         raise SiteError('페이지 로딩 시간이 초과되었습니다.' + (' ' + last_navigation_error if last_navigation_error else ''))
 
+    def continue_html(self, path):
+        """Read the manually confirmed catalog tab without navigation or refresh."""
+        self.check()
+        try:
+            state = self.evaluate("({url:location.href, ready:document.readyState, html:document.documentElement ? document.documentElement.outerHTML : ''})") or {}
+        except NavigationPending:
+            raise Blocked('확인한 목록 페이지가 전환 중입니다. 표시 완료 후 계속을 누르세요.') from None
+        if not state.get('url'):
+            raise Blocked('현재 작업 탭의 주소를 확인할 수 없습니다.')
+        current, expected = urlsplit(state.get('url', '')), urlsplit(self.base + path)
+        if origin(state.get('url', '')) != self.base or current.path != expected.path or current.query != expected.query:
+            raise Blocked('확인할 작품 목록과 현재 작업 탭 주소가 다릅니다. 안내된 주소에서 직접 확인하세요.')
+        html = state.get('html') or ''
+        check_page(html)
+        if not html or state.get('ready') not in ('interactive', 'complete'):
+            raise Blocked('작품 목록이 아직 준비되지 않았습니다. 목록 표시 확인 후 계속을 누르세요.')
+        return html
+
     def body(self, nid, item):
         html = self.html('/novel/%s/%s' % (nid, item['id']))
         return self.displayed_body(nid, item, html)
