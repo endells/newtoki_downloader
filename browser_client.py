@@ -52,6 +52,15 @@ BODY_EXPRESSION = r'''(() => {
     message: notice, title: document.title, locked: gate.active === true || gate.locked === true || !!document.querySelector('[data-theme-novel-unlock]')};
 })()'''
 
+LOAD_MORE_EXPRESSION = r'''(() => {
+  const list = document.querySelector('.novel-eps');
+  const section = list && list.closest('section');
+  const button = section && Array.from(section.querySelectorAll('button')).find(b => (b.innerText || '').trim() === '이전 회차 더 보기');
+  if (!button || button.disabled || !button.getClientRects().length) return false;
+  button.click();
+  return true;
+})()'''
+
 
 def endpoint(value):
     u = urlsplit(str(value).strip())
@@ -164,8 +173,8 @@ class BrowserClient:
         while True:
             self.check()
             try:
-                parse_catalog(html, self.base + path)
-                return html
+                data = parse_catalog(html, self.base + path)
+                return self.expand_catalog(path, html, data)
             except Blocked:
                 raise
             except SiteError as exc:
@@ -177,6 +186,35 @@ class BrowserClient:
             if self.stop.wait(.5):
                 self.check()
             html = self.continue_html(path)
+
+    def expand_catalog(self, path, html, data):
+        for _ in range(1000):
+            self.check()
+            if not data.get('has_more'):
+                if data.get('total_episodes') is not None and len(data['episodes']) != data['total_episodes']:
+                    self.keep_tab = True
+                    raise CatalogStructureError('표시된 전체 회차 수와 읽은 목록 수가 다릅니다. 일부 목록으로 진행하지 않습니다.')
+                return html
+            previous = len(data['episodes'])
+            if self.stop.wait(self.delay):
+                self.check()
+            if not self.evaluate(LOAD_MORE_EXPRESSION):
+                self.keep_tab = True
+                raise CatalogStructureError('이전 회차 더 보기 버튼을 누를 수 없습니다. 현재 작업 탭을 확인하세요.')
+            deadline = time.monotonic() + self.timeout
+            while time.monotonic() < deadline:
+                self.check()
+                html = self.continue_html(path)
+                data = parse_catalog(html, self.base + path)
+                if len(data['episodes']) > previous:
+                    break
+                if self.stop.wait(.5):
+                    self.check()
+            else:
+                self.keep_tab = True
+                raise CatalogStructureError('더보기 후 회차 목록이 늘어나지 않았습니다. 현재 작업 탭을 유지합니다.')
+        self.keep_tab = True
+        raise CatalogStructureError('목록 더보기 횟수가 1000회를 넘었습니다.')
 
     def html(self, path):
         if not path.startswith('/novel/'):

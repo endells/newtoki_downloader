@@ -74,6 +74,8 @@ def collect_catalog(client, nid, update=lambda **kw: None, read_page=None, first
         path = '/novel/' + nid + ('?epage=' + str(page) if page > 1 else '')
         html = first_html if page == 1 and first_html is not None else (read_page or client.html)(path)
         data = parse_catalog(html, client.base + path)
+        if data.get('has_more') or (data.get('total_episodes') is not None and len(data['episodes']) != data['total_episodes']):
+            raise SiteError('새 사이트의 전체 회차 목록 로딩이 끝나지 않았습니다. 일부 목록으로 진행하지 않습니다.')
         signature = tuple(e['id'] for e in data['episodes'])
         if signature in seen_pages:
             raise SiteError('목록 페이지가 반복됩니다. 일부 목록만으로 다운로드하지 않고 중단했습니다.')

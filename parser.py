@@ -125,7 +125,7 @@ def check_page(html):
     title = doc.first(tag='title')
     title = clean(title.text()).lower() if title else ''
     # Inspect challenge pages, not comments mentioning login, points or Cloudflare.
-    known_site = doc.first(cls='serial-list') or doc.first(attr='data-theme-novel-content')
+    known_site = doc.first(cls='serial-list') or doc.first(cls='novel-eps') or doc.first(attr='data-theme-novel-content')
     if not known_site:
         visible = doc.text()
         if 'KR_ONLY' in visible:
@@ -143,6 +143,8 @@ def parse_catalog(html, url):
     title_node = doc.first(cls='theme-detail-title-line')
     listing = doc.first(cls='serial-list')
     if not title_node or not listing:
+        if doc.first(cls='novel-detail') and doc.first(cls='novel-eps'):
+            return parse_modern_catalog(doc, url)
         raise SiteError('작품 제목/회차 목록 구조를 확인하지 못했습니다.')
     episodes, seen = [], set()
     for row in listing.walk(tag='li', cls='list-item'):
@@ -195,6 +197,48 @@ def parse_catalog(html, url):
     return {'cover_url': cover, 'id': nid, 'title': clean(title_node.text()), 'author': author,
             'description': description.text().strip() if description else '',
             'episodes': episodes, 'pages': sorted(pages)}
+
+
+def parse_modern_catalog(doc, url):
+    nid, base = novel_id(url), origin(url)
+    detail, listing = doc.first(cls='novel-detail'), doc.first(cls='novel-eps')
+    title = detail.first(tag='h1')
+    if not title or not clean(title.text()) or listing.attrs.get('data-novel-id') != nid:
+        raise SiteError('새 목록의 작품 제목/번호가 일치하지 않습니다.')
+    episodes, seen, numbers = [], set(), set()
+    for row in listing.walk(cls='novel-ep-row'):
+        link, number, label = row.first(cls='novel-ep-link'), row.first(cls='ne-num'), row.first(cls='ne-title')
+        if not link or not number or not label:
+            raise SiteError('새 목록의 회차 항목 구조를 확인하지 못했습니다.')
+        href = urljoin(base, link.attrs.get('href', ''))
+        target = urlsplit(href)
+        match = re.fullmatch(r'/novel/' + re.escape(nid) + r'/([1-9][0-9]*)/?', target.path)
+        no = re.fullmatch(r'([0-9]+)\s*(?:화|회)?', clean(number.text()))
+        if not match or origin(href) != base or not no:
+            raise SiteError('새 목록의 ID/회차 번호/도메인이 일치하지 않습니다.')
+        eid, value = match[1], int(no[1])
+        if row.attrs.get('data-episode-id', eid) != eid or row.attrs.get('data-ep', str(value)) != str(value):
+            raise SiteError('새 목록의 표시 회차와 데이터가 일치하지 않습니다.')
+        if eid in seen or value in numbers:
+            raise SiteError('새 목록에 중복된 회차 ID 또는 번호가 있습니다.')
+        seen.add(eid);numbers.add(value)
+        badges = list(row.walk(cls='paid-badge'))
+        locked = bool(row.first(cls='fa-lock') or row.first(cls='ne-lock')) or row.attrs.get('data-locked') == 'true' or any(any(x in clean(b.text()) for x in ('유료','구매','포인트')) for b in badges)
+        episodes.append(dict(id=eid, no=value, title=clean(label.text()), locked=locked, url=base + target.path))
+    if not episodes:
+        raise SiteError('회차 목록이 비어 있습니다.')
+    meta = detail.first(cls='nd-meta')
+    author = meta.first(tag='span') if meta else None
+    description = detail.first(cls='nd-desc')
+    thumb = detail.first(cls='nd-thumb')
+    image = thumb.first(tag='img') if thumb else None
+    cover = urljoin(url, image.attrs.get('data-src') or image.attrs.get('src', '')) if image else ''
+    head = doc.first(cls='novel-episode-head')
+    total = re.search(r'\(([0-9]+)\s*화\)', clean(head.text())) if head else None
+    more = any(clean(button.text()) == '이전 회차 더 보기' for button in doc.walk(tag='button'))
+    return dict(id=nid,title=clean(title.text()),author=clean(author.text()) if author else '',
+                description=description.text().strip() if description else '',cover_url=cover if urlsplit(cover).scheme=='https' else '',
+                episodes=episodes,pages=[1],has_more=more and (total is None or len(episodes)<int(total[1])),total_episodes=int(total[1]) if total else None)
 
 
 def viewer_config(html, nid, eid):
