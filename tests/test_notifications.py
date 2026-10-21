@@ -80,6 +80,25 @@ class NotificationTests(unittest.TestCase):
             self.assertEqual(json.loads(request.data)['allowed_mentions'], {'parse': []})
             self.assertTrue(request.full_url.endswith('?wait=true'))
 
+    def test_notification_times_are_korean_without_offset(self):
+        for source, expected in [
+            ('2026-10-21T00:22:24+00:00', '2026-10-21 09:22:24'),
+            ('2026-10-21T00:22:24Z', '2026-10-21 09:22:24'),
+            ('2026-10-21T09:22:24+09:00', '2026-10-21 09:22:24'),
+            ('2026-10-20T23:22:24+00:00', '2026-10-21 08:22:24'),
+            ('2026-10-21T00:22:24', '2026-10-21 09:22:24'),
+        ]:
+            with self.subTest(source=source):
+                self.report['state']['finished']=source
+                text='\n'.join(summary_messages(self.report))
+                self.assertIn('종료: '+expected,text)
+                self.assertNotIn('+00:00',text)
+                self.assertNotIn('+09:00',text)
+        self.report['state'].update(status='verification_waiting')
+        self.report['state'].pop('finished')
+        with patch('newtoki_downloader.notifications.now',return_value='2026-10-21T00:22:24+00:00'):
+            self.assertIn('대기 시작: 2026-10-21 09:22:24','\n'.join(summary_messages(self.report)))
+
     def test_activity_is_bounded_and_redacted(self):
         log = ActivityLog(Path(self.tmp.name) / 'log.db')
         log.add('ERROR', self.url + '\nCookie: secret')

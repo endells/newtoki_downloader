@@ -1,6 +1,7 @@
 """Discord download summaries and a bounded, credential-redacted activity log."""
 import json
 import logging
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 import re
 import sqlite3
@@ -86,6 +87,17 @@ def range_lines(numbers):
         yield '회차: ' + current
 
 
+def notification_time(value=None):
+    """Display all notification timestamps in Korea, regardless of the host timezone."""
+    try:
+        stamp = datetime.fromisoformat(str(value or now()).replace('Z', '+00:00'))
+        if stamp.tzinfo is None:
+            stamp = stamp.replace(tzinfo=timezone.utc)
+        return stamp.astimezone(timezone(timedelta(hours=9))).strftime('%Y-%m-%d %H:%M:%S')
+    except (TypeError, ValueError):
+        return '시간 확인 불가'
+
+
 def summary_messages(report):
     state = report['state']
     source = report.get('source', '수동 다운로드')
@@ -112,7 +124,7 @@ def summary_messages(report):
         lines += ['', '오류: ' + redact(state.get('last_error') or state.get('message', ''))[:600]]
     if state.get('warnings'):
         lines += ['경고: ' + redact(state.get('last_warning', ''))[:500]]
-    lines += [('대기 시작: ' if state.get('status') == 'verification_waiting' else '종료: ') + state.get('finished', now())]
+    lines += [('대기 시작: ' if state.get('status') == 'verification_waiting' else '종료: ') + notification_time(state.get('finished'))]
     messages, current = [], ''
     for line in lines:
         line = line[:900]
