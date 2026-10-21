@@ -18,6 +18,11 @@
 .nt label{display:block;margin:12px 0 5px;font-weight:600}
 .nt-check{font-weight:400!important}
 .nt-check input{margin-right:7px}
+.nt #files-folders{padding:6px 12px;box-sizing:border-box}
+.nt #files-folders .nt-check{display:flex!important;align-items:center;gap:8px;margin:0!important;padding:7px 0;cursor:pointer}
+.nt #files-folders .nt-check input,.nt #files-all{position:static!important;float:none!important;flex:0 0 16px;margin:0!important;width:16px!important;height:16px!important}
+.nt #files-folders .nt-check span{min-width:0;overflow-wrap:anywhere}
+.nt .nt-actions label:has(#files-all){display:inline-flex!important;align-items:center;gap:8px;margin:0!important}
 .nt-grid{display:grid;grid-template-columns:1fr 1fr;gap:0 20px}
 .nt-actions{display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin:12px 0}
 .nt button{border:1px solid #6984a7!important;border-radius:5px;padding:7px 12px;background:#293d58!important;color:#f0f5ff!important;font-weight:600;transition:background .12s,border-color .12s}
@@ -52,7 +57,7 @@
 @media(max-width:650px){.nt-grid{grid-template-columns:1fr}.nt-card{padding:12px}.nt{padding:12px 8px}.nt .nt-scroll table td,.nt .nt-scroll table th{padding:7px;font-size:12px}}
 </style>
 <main class="nt">
-<h3>북토끼 소설 다운 <span class="badge">v0.2.13 · 테스트</span></h3>
+<h3>북토끼 소설 다운 <span class="badge">v0.2.14 · 테스트</span></h3>
 <section class="nt-status" aria-label="작업 상태">
  <div class="nt-row"><strong>작업 상태</strong><span id="state" class="nt-state" role="status">확인 중</span><button id="resume" class="primary" hidden>확인 후 계속</button><button id="stop" disabled>중지</button></div>
  <div id="verification-help" class="nt-note" hidden></div><div id="counts"></div><progress id="progress" value="0" max="1"></progress><div id="error" class="nt-error"></div><div id="domain-change"></div><div id="domain-attempts" class="nt-msg"></div>
