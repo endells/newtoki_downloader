@@ -477,7 +477,8 @@ class Engine:
             self.on_event = config.get('on_event')
             self.on_verification = config.get('on_verification')
             self.state = {'status': 'running', 'message': '작업 준비 중', 'kind': kind, 'completed': 0,
-                          'skipped': 0, 'failed': 0, 'done': 0, 'total': 0, 'started': now()}
+                          'skipped': 0, 'failed': 0, 'done': 0, 'total': 0, 'started': now(),
+                          'manual_mode': config.get('manual_mode', '')}
         self.thread = threading.Thread(target=self.run, args=(kind, ids, dict(config), selected, handle), daemon=True)
         try:
             self.thread.start()

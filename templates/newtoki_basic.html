@@ -61,7 +61,7 @@
 @media(max-width:650px){.nt-grid{grid-template-columns:1fr}.nt-card{padding:12px}.nt{padding:12px 8px}.nt .nt-scroll table td,.nt .nt-scroll table th{padding:7px;font-size:12px}}
 </style>
 <main class="nt">
-<h3>북토끼 소설 다운 <span class="badge">v0.2.30 · 테스트</span></h3>
+<h3>북토끼 소설 다운 <span class="badge">v0.2.31 · 테스트</span></h3>
 <section class="nt-status" aria-label="작업 상태">
  <div class="nt-row"><strong>작업 상태</strong><span id="state" class="nt-state" role="status">확인 중</span><button id="resume" class="primary" hidden>확인 후 계속</button><button id="stop" disabled>중지</button></div>
  <div id="verification-help" class="nt-note" hidden></div><div id="counts"></div><progress id="progress" value="0" max="1"></progress><div id="error" class="nt-error"></div><div id="domain-change"></div><div id="domain-attempts" class="nt-msg"></div>
@@ -100,6 +100,9 @@
 {% elif page == 'manual' %}
 <section class="nt-card">
 <label for="novel">작품 URL 또는 번호</label><input id="novel" type="text" placeholder="작품 URL 또는 번호를 입력하세요">
+<label for="manual-mode">수동 다운로드 주소 방식</label>
+<select id="manual-mode"><option value="legacy_only" {% if config.domain_mode != 'modern_only' %}selected{% endif %}>구주소로 받기</option><option value="modern_only" {% if config.domain_mode == 'modern_only' %}selected{% endif %}>신주소로 받기</option></select>
+<small>선택한 주소 방식으로 작품 분석과 다운로드를 진행합니다. 주소 방식을 바꾸면 작품 분석을 다시 눌러 주세요. 자동 수집 설정에는 영향을 주지 않습니다. 인증이 나오면 현재 탭에서 직접 확인 후 계속을 누르세요.</small>
 <small>최근 작업한 작품 · 선택하면 번호만 입력됩니다.</small>
 <div id="recent-books" class="nt-actions" aria-label="최근 작업한 작품 5개"></div>
 <div class="nt-actions"><button id="analyze" class="primary" data-work>작품 분석</button><button id="add-auto">자동 수집에 추가</button></div>
@@ -165,11 +168,11 @@
 (function(){
 'use strict';
 const endpoint={{ ('/' + package_name + '/ajax/basic/command')|tojson }}, csrf={{ csrf_token|tojson }}, page={{ page|tojson }};
-let analysis=null, rendered='', running=false;
+let analysis=null, rendered='', running=false, manualNeedsAnalysis=false;
 let folderPath='', folderParent='';
 const $=id=>document.getElementById(id), msg=t=>{$('message').textContent=t;};
-async function post(command,arg1='',arg2=''){
- const body=new URLSearchParams({command,csrf_token:csrf,arg1,arg2});
+async function post(command,arg1='',arg2='',arg3=''){
+ const body=new URLSearchParams({command,csrf_token:csrf,arg1,arg2,arg3});
  const response=await fetch(endpoint,{method:'POST',body,credentials:'same-origin'});
  if(!response.ok)throw new Error('요청 실패 HTTP '+response.status+' · 새로고침 후 다시 시도하세요.');
  const data=await response.json();if(data.ret!=='success')throw new Error(data.msg||'처리 실패');return data;
@@ -186,10 +189,10 @@ bind('copy-verification-url',async()=>{const field=$('verification-url'),url=fie
 async function poll(){try{const d=await post('status'),s=d.state;running=s.status==='running'||s.status==='verification_waiting';verification(s);$('state').textContent=(labels[s.status]||s.status)+' · '+s.message;$('counts').textContent='저장 '+(s.completed||0)+' / 건너뜀 '+(s.skipped||0)+' / 실패 '+(s.failed||0)+' / 파일 이력 반영 '+(s.history_imported||0)+' / 미저장 갱신 '+(s.history_missing||0);$('progress').max=s.total||1;$('progress').value=s.done||0;$('error').textContent=[s.last_error,s.last_warning].filter(Boolean).join('\n');$('stop').disabled=!running;document.querySelectorAll('[data-work]').forEach(b=>b.disabled=running);
  $('domain-attempts').textContent=(s.domain_attempts||[]).map(a=>a.kind+' · '+a.url+' · '+a.message).join('\n');
  if(s.domain_change){$('domain-change').textContent='도메인 변경: '+s.domain_change.old+' → '+s.domain_change.new;if($('base_url'))$('base_url').value=s.domain_change.new;}
- if(page==='manual'&&s.analysis){const key=JSON.stringify(s.analysis);if(key!==rendered){draw(s.analysis);rendered=key;recentBooks().catch(e=>msg(e.message));}}
+ if(page==='manual'&&!manualNeedsAnalysis&&s.analysis&&s.manual_mode===$('manual-mode').value){const key=JSON.stringify(s.analysis);if(key!==rendered){draw(s.analysis);rendered=key;recentBooks().catch(e=>msg(e.message));}}
  if(page==='files'&&s.file_report){const r=s.file_report;$('file-summary').textContent='파일 이력 반영 '+(r.history_imported||0)+' · 미저장 갱신 '+(r.history_missing||0)+' · 0바이트 '+(r.zero||0)+' · 분석 필요 폴더 '+(r.needs_analysis||0)+' · 미확인 회차 '+(r.unknown||0)+' · 변경 예정 '+r.planned+' · 파일 변경 '+r.files_renamed+' · 폴더 변경 '+r.folders_renamed+' · 이력 복구 '+r.history_repaired+' · 충돌 '+r.conflicts+' · 제외 '+r.skipped+(r.truncated?' · 결과는 500건까지 표시':'');$('file-rows').replaceChildren();for(const item of r.rows){const tr=document.createElement('tr');[item.kind,item.source,item.target,item.message].forEach(v=>cell(tr,v));$('file-rows').appendChild(tr);}}
  if(page==='files'&&s.file_report){const r=s.file_report;$('epub-result').textContent=r.epub_created===undefined?'':'EPUB 생성 '+r.epub_created+' · 실패 '+r.epub_failed;}
- if(page==='manual')count();
+ if(page==='manual'){$('manual-mode').disabled=running;count();}
  }catch(e){msg(e.message);}setTimeout(poll,2000);}
 function fileScope(){if($('files-all').checked)return 'null';const names=Array.from(document.querySelectorAll('#files-folders input:checked')).map(x=>x.value);if(!names.length)throw new Error('실행할 작품 폴더를 하나 이상 선택하세요.');return JSON.stringify(names);}
 async function fileFolders(){const d=await post('file_folders');const selected=new Set(Array.from(document.querySelectorAll('#files-folders input:checked')).map(x=>x.value));$('files-folders').replaceChildren();for(const name of d.folders){const label=document.createElement('label'),box=document.createElement('input'),text=document.createElement('span');label.className='nt-check';box.type='checkbox';box.value=name;box.checked=selected.has(name);box.addEventListener('change',()=>{if(box.checked)$('files-all').checked=false;});text.textContent=name;label.appendChild(box);label.appendChild(text);$('files-folders').appendChild(label);}}
@@ -218,12 +221,13 @@ bind('save-connection',async()=>{const data={};for(const key of ['base_url','bro
 bind('browser-check',async()=>{const button=$('browser-check'),result=$('browser-check-result');button.disabled=true;result.textContent='전용 브라우저 연결 확인 중…';try{result.textContent=(await post('browser_check',$('browser_url').value)).msg;}catch(e){result.textContent=e.message;throw e;}finally{button.disabled=false;}});
 async function runNow(){msg((await post('run')).msg);}
 bind('run',runNow);bind('run-top',runNow);bind('domain',async()=>msg((await post('domain',$('probe').value)).msg));
-bind('analyze',async()=>{const d=await post('analyze',$('novel').value);analysis=null;rendered='';$('episodes').replaceChildren();$('book-title').textContent='작품과 저장 파일 확인 중';count();msg(d.msg);});bind('add-auto',async()=>msg((await post('add_auto',$('novel').value)).msg));
+if($('manual-mode'))$('manual-mode').addEventListener('change',()=>{manualNeedsAnalysis=true;analysis=null;rendered='';$('episodes').replaceChildren();$('book-title').textContent='주소 방식이 바뀌었습니다. 작품 분석을 다시 눌러 주세요.';count();});
+bind('analyze',async()=>{const d=await post('analyze',$('novel').value,$('manual-mode').value);manualNeedsAnalysis=false;analysis=null;rendered='';$('episodes').replaceChildren();$('book-title').textContent='작품과 저장 파일 확인 중';count();msg(d.msg);});bind('add-auto',async()=>msg((await post('add_auto',$('novel').value)).msg));
 
 bind('select-range',()=>{const a=Number($('range-from').value),b=Number($('range-to').value);if(!Number.isInteger(a)||!Number.isInteger(b)||a<1||b<a)throw new Error('시작·끝 회차를 올바르게 입력하세요.');document.querySelectorAll('#episodes input').forEach(x=>x.checked=!x.disabled&&Number(x.dataset.no)>=a&&Number(x.dataset.no)<=b);count();});
 bind('select-missing',()=>{document.querySelectorAll('#episodes input').forEach(x=>x.checked=!x.disabled);count();});
 bind('select-none',()=>{document.querySelectorAll('#episodes input').forEach(x=>x.checked=false);count();});
-bind('download',async()=>{if(!analysis)throw new Error('먼저 작품을 분석하세요.');const ids=Array.from(document.querySelectorAll('#episodes input:checked:not(:disabled)')).map(x=>x.value);if(!ids.length)throw new Error('받을 회차를 선택하세요.');msg((await post('download',analysis.id,JSON.stringify(ids))).msg);});
+bind('download',async()=>{if(!analysis)throw new Error('먼저 작품을 분석하세요.');const ids=Array.from(document.querySelectorAll('#episodes input:checked:not(:disabled)')).map(x=>x.value);if(!ids.length)throw new Error('받을 회차를 선택하세요.');msg((await post('download',analysis.id,JSON.stringify(ids),$('manual-mode').value)).msg);});
 async function history(){const d=await post('history');$('history').replaceChildren();for(const r of d.rows){const tr=document.createElement('tr');[r.novel_id,r.no,r.title,labels[r.status]||r.status,r.error||r.path].forEach(t=>cell(tr,t));$('history').appendChild(tr);}}
 async function titles(){const d=await post('titles');$('title-list').replaceChildren();$('titles').value=d.rows.map(x=>x.id).join('\n');for(const x of d.rows){const tr=document.createElement('tr');cell(tr,x.title+' ['+x.id+']');cell(tr,x.completed);const td=cell(tr,'');for(const [label,command] of [['지금 받기','run_title'],['목록에서 제외','remove_auto']]){const b=document.createElement('button');b.textContent=label;b.onclick=async()=>{try{msg((await post(command,x.id)).msg);if(command==='remove_auto')await titles();}catch(e){msg(e.message);}};td.appendChild(b);}$('title-list').appendChild(tr);}}
 bind('register-title',async()=>{msg((await post('add_auto',$('add-title').value)).msg);await titles();});bind('refresh-titles',titles);if(page==='setting')titles().catch(e=>msg(e.message));

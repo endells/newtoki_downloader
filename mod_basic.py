@@ -117,6 +117,15 @@ class ModuleBasic(PluginModuleBase):
         if self.discord.notify({'state': state, 'source': '보안 확인 대기', 'downloads': []}):
             self.activity.add('INFO', 'Discord 보안 확인 대기 알림 전송 완료')
 
+    def manual_runtime(self, mode):
+        conf = self.runtime()
+        if not mode:
+            return conf  # Compatibility with an already-open older page.
+        if mode not in ('legacy_only', 'modern_only'):
+            raise SiteError('수동 다운로드 주소 방식을 선택하세요.')
+        conf.update(domain_mode=mode, manual_mode=mode, auto_domain=True, save_domain=None)
+        return conf
+
     def download_finished(self, report):
         state = report['state']
         self.activity.add('ERROR' if state.get('failed') or state['status'] in ('failed', 'verification_required', 'limit_reached', 'locked', 'body_pending') else 'INFO',
@@ -319,13 +328,15 @@ class ModuleBasic(PluginModuleBase):
                         ids.append(nid)
                     self.P.ModelSetting.set('titles', '\n'.join(ids))
                 return jsonify(ret='success', msg='자동 수집 목록에 추가했습니다. 예약 실행 여부는 설정을 따릅니다.')
-            if command in ('analyze', 'domain'):
+            if command == 'analyze':
+                engine.start(command, [novel_id(arg1)], self.manual_runtime(arg2))
+            elif command == 'domain':
                 engine.start(command, [novel_id(arg1)], self.runtime())
             elif command == 'download':
                 selected = json.loads(arg2 or '[]')
                 if not isinstance(selected, list) or not selected or len(selected) > 10000 or any(not str(x).isdigit() for x in selected):
                     raise SiteError('받을 회차를 선택하세요.')
-                engine.start('download', [novel_id(arg1)], self.runtime(), selected)
+                engine.start('download', [novel_id(arg1)], self.manual_runtime(arg3), selected)
             elif command == 'run':
                 conf = self.runtime()
                 engine.start('download', title_ids(conf['titles']), conf)
@@ -358,3 +369,4 @@ class ModuleBasic(PluginModuleBase):
             F.scheduler.remove_job(job_id)
         if self.engine:
             self.engine.cancel()
+
