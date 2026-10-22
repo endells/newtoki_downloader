@@ -143,7 +143,7 @@ class PauseResume(unittest.TestCase):
                 return fixtures.catalog([1])
         c=C(fixtures.BASE);self.engine.factory=lambda *args:c
         saved=[];alerts=[]
-        self.config.update(auto_domain=True,save_domain=saved.append,on_verification=alerts.append)
+        self.config.update(auto_domain=True,domain_mode='modern_only',save_domain=saved.append,on_verification=alerts.append)
         with patch('engine.fetch_announcement',return_value=('<a href="https://toki35.com">신버전 바로가기</a><a href="https://newtoki2.org">구버전 바로가기</a>','https://notice.example/')):
             self.engine.start('analyze',['123'],self.config)
             self.addCleanup(lambda:(self.engine.cancel(),self.engine.thread.join(2)))

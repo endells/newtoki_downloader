@@ -29,6 +29,17 @@ class Locked(SiteError):
     code = 'locked'
 
 
+class AccessLimited(SiteError):
+    code = 'limit_reached'
+
+
+def check_limit(text):
+    text = clean(str(text)).lower()
+    if (re.search(r'(?:일일|하루|금일|오늘).{0,35}(?:한도|제한|초과)|(?:열람|이용|조회|접속)\s*(?:횟수|한도).{0,25}(?:초과|제한)', text)
+            or any(x in text for x in ('too many requests', 'daily limit', 'rate limit exceeded'))):
+        raise AccessLimited('사이트 이용 한도/요청 제한에 도달했습니다. 다른 주소로 자동 전환하지 않습니다. 제한 해제 후 다시 실행하세요.')
+
+
 class Pending(SiteError):
     code = 'body_pending'
 
@@ -136,6 +147,8 @@ def verification_notice(text):
 def check_page(html):
     doc = Document(html)
     loading = doc.first(cls='novel-loading')
+    if loading:
+        check_limit(loading.text())
     if loading and verification_notice(clean(loading.text())):
         raise Blocked('본문 인증이 필요합니다: ' + clean(loading.text())[:180])
     title = doc.first(tag='title')
@@ -144,6 +157,9 @@ def check_page(html):
     known_site = doc.first(cls='serial-list') or doc.first(cls='novel-eps') or doc.first(cls='novel-viewer') or doc.first(attr='data-theme-novel-content')
     if not known_site:
         visible = doc.text()
+        check_limit(visible)
+        if any(x in visible for x in ('로그인이 필요합니다', '로그인 후 이용', '로그인 후 열람', '구매 후 열람')):
+            raise Locked('로그인 또는 구매가 필요한 페이지입니다. 다른 주소로 자동 전환하지 않습니다.')
         if 'KR_ONLY' in visible:
             raise Blocked('KR_ONLY: 현재 브라우저의 접속 지역이 허용되지 않습니다.')
         if any(x in title for x in ('just a moment', 'access denied', 'attention required')) or doc.first(attr='data-cf-beacon') and 'Verify you are human' in visible:
@@ -299,6 +315,7 @@ def validate_body(snapshot):
     if not isinstance(snapshot, dict):
         raise Pending('본문이 아직 표시되지 않았습니다.')
     message = snapshot.get('message') or ''
+    check_limit(message)
     title = str(snapshot.get('title') or '').lower()
     if snapshot.get('locked'):
         raise Locked('로그인 또는 포인트 구매가 필요한 회차입니다.')

@@ -150,7 +150,7 @@ class FFTests(unittest.TestCase):
         with self.app.test_request_context('/'):
             setting=self.module.process_menu('setting',None)
             integration=self.module.process_menu('integration',None)
-        for key in ('base_url','browser_url','announcement_url','auto_domain','probe','domain'):
+        for key in ('base_url','browser_url','announcement_url','auto_domain','domain_mode','probe','domain'):
             self.assertNotIn('id="'+key+'"',setting)
             self.assertIn('id="'+key+'"',integration)
         self.settings.set('titles','123')
@@ -163,6 +163,11 @@ class FFTests(unittest.TestCase):
         self.assertFalse(self.module.config()['auto_domain'])
         self.assertEqual(self.module.config()['base_url'],'https://newtoki2.org')
         self.assertIsNone(self.module.engine.thread)
+        self.assertEqual(self.module.config()['domain_mode'],'legacy_first')
+        self.assertEqual(self.send('save_connection',json.dumps({'domain_mode':'modern_only'}))['ret'],'success')
+        self.assertEqual(self.module.config()['domain_mode'],'modern_only')
+        self.assertEqual(self.send('save_connection',json.dumps({'domain_mode':'invalid'}))['ret'],'error')
+        self.assertEqual(self.module.config()['domain_mode'],'modern_only')
         self.send('save',json.dumps({'titles':'456'}))
         self.assertEqual(self.module.config()['base_url'],'https://newtoki2.org')
         self.assertEqual(self.module.config()['browser_url'],'http://127.0.0.1:9223')

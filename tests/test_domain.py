@@ -16,7 +16,7 @@ class Domains(unittest.TestCase):
     def setUp(self):
         self.tmp=tempfile.TemporaryDirectory();self.addCleanup(self.tmp.cleanup)
         self.engine=Engine(Path(self.tmp.name)/'history.db')
-        self.saved=[];self.conf={'save_domain':self.saved.append,'announcement_url':DEFAULT_ANNOUNCEMENT}
+        self.saved=[];self.conf={'save_domain':self.saved.append,'announcement_url':DEFAULT_ANNOUNCEMENT,'domain_mode':'modern_only'}
         self.outcomes={};self.calls=[]
         outer=self
         class Client:
@@ -32,6 +32,46 @@ class Domains(unittest.TestCase):
         self.fetch=self.patcher.start();self.addCleanup(self.patcher.stop)
 
     def resolve(self):self.engine.resolve(self.client,'123',self.conf)
+
+    def test_default_unified_mode_uses_legacy_first_even_after_modern_success(self):
+        self.conf.pop('domain_mode')
+        self.client.base='https://toki35.com'
+        self.resolve()
+        self.assertEqual(self.calls,['https://newtoki2.org'])
+        self.assertEqual(self.saved,['https://newtoki2.org'])
+
+    def test_legacy_failure_falls_back_to_modern(self):
+        self.conf['domain_mode']='legacy_first'
+        self.outcomes={k:SiteError('접속 실패') for k in ('https://newtoki1.org','https://newtoki2.org')}
+        self.resolve()
+        self.assertEqual(self.calls,['https://newtoki1.org','https://newtoki2.org','https://toki34.com'])
+        self.assertEqual(self.saved,['https://toki34.com'])
+
+    def test_legacy_only_does_not_visit_modern(self):
+        self.conf['domain_mode']='legacy_only'
+        self.outcomes={k:SiteError('접속 실패') for k in ('https://newtoki1.org','https://newtoki2.org')}
+        with self.assertRaises(SiteError):self.resolve()
+        self.assertEqual(self.calls,['https://newtoki1.org','https://newtoki2.org'])
+
+    def test_limits_and_locks_never_switch_domains(self):
+        from parser import AccessLimited, Locked
+        self.conf['domain_mode']='legacy_first'
+        for error in (AccessLimited('일일 한도'), Locked('로그인 필요'), Blocked('사람 확인')):
+            with self.subTest(error=error.code):
+                self.calls.clear()
+                self.outcomes={'https://newtoki1.org':error}
+                with patch.object(self.engine,'read_page',side_effect=lambda client,path,**kw:client.html(path)):
+                    with self.assertRaises(type(error)):self.resolve()
+                self.assertEqual(self.calls,['https://newtoki1.org'])
+                self.assertEqual(self.saved,[])
+
+    def test_legacy_structure_failure_can_use_modern_but_modern_tab_is_preserved(self):
+        from browser_client import CatalogStructureError
+        self.conf['domain_mode']='legacy_first'
+        self.outcomes={k:CatalogStructureError('목록 구조 변경') for k in ('https://newtoki1.org','https://newtoki2.org')}
+        with patch.object(self.engine,'read_page',side_effect=lambda client,path,**kw:client.html(path)):
+            self.resolve()
+        self.assertEqual(self.calls[-1],'https://toki34.com')
 
     def test_modern_first_without_visiting_legacy(self):
         self.resolve()

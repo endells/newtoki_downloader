@@ -16,13 +16,13 @@ from urllib.parse import urlsplit
 from xml.sax.saxutils import escape
 
 try:
-    from .parser import SiteError, Blocked, Locked, Pending, Cancelled, parse_catalog, discover_legacy, origin, novel_id
-    from .browser_client import BrowserClient, NoRedirect, CatalogStructureError
-    from .domain import DEFAULT_ANNOUNCEMENT, DEFAULT_BASE, fetch_announcement, discover_candidates
+    from .parser import SiteError, Blocked, Locked, AccessLimited, Pending, Cancelled, parse_catalog, discover_legacy, origin, novel_id
+    from .browser_client import BrowserClient, NoRedirect, CatalogStructureError, DomainUnavailable
+    from .domain import DEFAULT_ANNOUNCEMENT, DEFAULT_BASE, fetch_announcement, discover_candidates, domain_candidates
 except ImportError:
-    from parser import SiteError, Blocked, Locked, Pending, Cancelled, parse_catalog, discover_legacy, origin, novel_id
-    from browser_client import BrowserClient, NoRedirect, CatalogStructureError
-    from domain import DEFAULT_ANNOUNCEMENT, DEFAULT_BASE, fetch_announcement, discover_candidates
+    from parser import SiteError, Blocked, Locked, AccessLimited, Pending, Cancelled, parse_catalog, discover_legacy, origin, novel_id
+    from browser_client import BrowserClient, NoRedirect, CatalogStructureError, DomainUnavailable
+    from domain import DEFAULT_ANNOUNCEMENT, DEFAULT_BASE, fetch_announcement, discover_candidates, domain_candidates
 
 ANNOUNCEMENT = DEFAULT_ANNOUNCEMENT
 
@@ -294,8 +294,9 @@ class Engine:
                 self.update(status='running', last_error='', message='확인한 작업 탭에서 작품 목록 읽는 중')
                 resumed = True
 
-    def read_body(self, client, nid, item, on_wait=None):
+    def read_body(self, client, nid, item, on_wait=None, config=None):
         resumed, retries, announced = False, 0, False
+        switched = False
         while True:
             self.stop_check()
             client.check()
@@ -330,6 +331,19 @@ class Engine:
                 client.check()
                 self.update(status='running', message='확인한 작업 탭에서 현재 회차 본문 읽는 중', last_error='')
                 resumed = True
+            except DomainUnavailable:
+                if resumed or switched or not config or not config.get('auto_domain'):
+                    raise
+                switched = True
+                previous = client.base
+                self.update(message='주소 연결 장애 · 대체 주소에서 작품과 회차를 다시 확인합니다.')
+                html = self.resolve(client, nid, config, exclude=(previous,))
+                alternate = collect_catalog(client, nid, self.update, lambda path: self.read_page(client, path, catalog=True), html)
+                match = next((e for e in alternate['episodes'] if e['id'] == item['id']), None)
+                if not match or match['no'] != item['no']:
+                    raise SiteError('대체 주소의 회차 ID/번호가 다릅니다. 다시 작품 분석을 실행하세요.')
+                if match['locked']:
+                    raise Locked('대체 주소에서 해당 회차가 잠겨 있습니다.')
             except Pending:
                 if retries >= 1:
                     raise
@@ -382,9 +396,9 @@ class Engine:
             self.update(status='failed', message='작업 스레드를 시작하지 못했습니다.')
             raise
 
-    def resolve(self, client, nid, config):
+    def resolve(self, client, nid, config, exclude=()):
         old = client.base
-        self.update(message='안내 사이트에서 새 주소 확인 중')
+        self.update(message='안내 사이트에서 구주소·새주소 확인 중')
         warning = ''
         try:
             html, source = fetch_announcement(config.get('announcement_url', ANNOUNCEMENT), client.check)
@@ -396,15 +410,14 @@ class Engine:
             legacy, modern = [], []
             warning = str(exc) + ' 현재 저장 주소의 작품 목록을 확인합니다.'
             self.update(warnings=True, last_warning=warning)
-        # The user selected the modern site. Never rotate into legacy domains on a gate.
-        current = old if urlsplit(old).hostname.startswith('toki') else DEFAULT_BASE
-        candidates = list(dict.fromkeys(([current] + modern) if current == old else (modern + [current])))
+        candidates = domain_candidates(old, legacy, modern, config.get('domain_mode', 'legacy_first'), exclude)
         attempts, errors = [], []
         expected_title = self.book_info(nid)['title']
         for candidate in candidates:
             client.check()
             client.base = candidate
-            kind = '안내된 새 주소' if candidate in modern else '현재 새 주소' if candidate == old else '기본 새 주소'
+            family = '구주소' if urlsplit(candidate).hostname.startswith('newtoki') else '새주소'
+            kind = ('현재 ' if candidate == old else '안내된 ' if candidate in legacy + modern else '기본 ') + family
             self.update(message=kind + ' 작품 목록 확인: ' + candidate)
             try:
                 html = self.read_page(client, '/novel/' + nid, catalog=True)
@@ -414,7 +427,7 @@ class Engine:
             except Cancelled:
                 client.base = old
                 raise
-            except Blocked as exc:
+            except (Blocked, Locked, AccessLimited) as exc:
                 attempts.append({'url': client.base, 'requested_url': candidate, 'kind': kind, 'status': exc.code, 'message': str(exc)})
                 self.update(domain_attempts=attempts)
                 client.base = old
@@ -423,7 +436,7 @@ class Engine:
                 attempts.append({'url': client.base, 'requested_url': candidate, 'kind': kind, 'status': exc.code, 'message': str(exc)})
                 errors.append(exc)
                 self.update(domain_attempts=attempts)
-                if isinstance(exc, CatalogStructureError):
+                if isinstance(exc, CatalogStructureError) and not (config.get('domain_mode', 'legacy_first') == 'legacy_first' and family == '구주소'):
                     client.base = old
                     raise
                 continue
@@ -493,6 +506,8 @@ class Engine:
                     if kind == 'download' and batch_count >= batch_size:
                         self.batch_rest(batch_pause)
                         batch_count = 0
+                    if first_html is None and config.get('auto_domain'):
+                        first_html = self.resolve(client, nid, config)
                     book = collect_catalog(client, nid, self.update, lambda path: self.read_page(client, path, catalog=True), first_html)
                     first_html = None
                     self.history.cache_catalog(book)
@@ -568,7 +583,7 @@ class Engine:
                             batch_count = 0
                         self.update(message='받는 중: %s / %s회차 · 작업 %s/%s' % (book['title'], item['no'], i + 1, len(candidates)), episode_id=item['id'], episode_no=item['no'], position=i + 1)
                         try:
-                            text = self.read_body(client, nid, item, lambda: self.export(folder, book, root, config, client))
+                            text = self.read_body(client, nid, item, lambda: self.export(folder, book, root, config, client), config=config)
                             filename = '%0*d_%s.txt' % (config['episode_digits'], item['no'], safe_name(item['title']))
                             path = safe_path(folder, filename)
                             if path.exists():
@@ -602,7 +617,7 @@ class Engine:
                     self.export(folder, book, root, config, client)
             self.update(status='completed', message='완료', finished=now())
         except SiteError as exc:
-            if client and isinstance(exc, (Blocked, Pending, Locked)):
+            if client and isinstance(exc, (Blocked, Pending, Locked, AccessLimited)):
                 client.keep_tab = True
             self.update(status=exc.code, message=str(exc), last_error=str(exc), finished=now())
         except Exception as exc:

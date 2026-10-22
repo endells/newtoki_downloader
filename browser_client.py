@@ -27,6 +27,10 @@ class NavigationPending(SiteError):
     """Only a transient browser context loss while a document is navigating."""
 
 
+class DomainUnavailable(SiteError):
+    """DNS/transport failure only; never authentication, HTTP limits or browser disconnects."""
+
+
 class CatalogStructureError(SiteError):
     """A loaded catalog needs a parser update; preserve the visible tab."""
 
@@ -199,12 +203,12 @@ class BrowserClient:
         return response.get('result', {}).get('value')
 
     def accept_location(self, actual, path):
-        """Accept ordinary redirects within the modern site, preserving the requested work/page."""
+        """Accept redirects within each site family, preserving the requested work/page."""
         actual_base = origin(actual)
         current, expected = urlsplit(actual), urlsplit(self.base + path)
         if actual_base != self.base:
-            modern = lambda host: bool(re.fullmatch(r'toki[0-9]+\.(?:com|org|net)', host or ''))
-            if not (modern(current.hostname) and modern(expected.hostname)
+            family = lambda host: 'legacy' if re.fullmatch(r'newtoki[0-9]+\.(?:com|org|net)', host or '') else 'modern' if re.fullmatch(r'toki[0-9]+\.(?:com|org|net)', host or '') else None
+            if not (family(current.hostname) and family(current.hostname) == family(expected.hostname)
                     and current.path == expected.path and current.query == expected.query):
                 raise SiteError('다른 도메인 또는 작품 경로로 이동했습니다. 주소를 적용하지 않습니다.')
             self.base = actual_base
@@ -289,7 +293,11 @@ class BrowserClient:
         self.last_request = time.monotonic()
         result = self.call('Page.navigate', {'url': self.base + path})
         if result.get('errorText'):
-            raise SiteError('페이지 탐색 실패: ' + result['errorText'])
+            error = result['errorText']
+            if error in ('net::ERR_HTTP_RESPONSE_CODE_FAILURE', 'net::ERR_BLOCKED_BY_RESPONSE', 'net::ERR_ACCESS_DENIED'):
+                raise Blocked('사이트가 페이지 요청을 거부했습니다. 현재 작업 탭에서 응답과 접근 상태를 직접 확인하세요: ' + error)
+            transport = any(error == 'net::' + code for code in ('ERR_NAME_NOT_RESOLVED', 'ERR_CONNECTION_REFUSED', 'ERR_CONNECTION_RESET', 'ERR_CONNECTION_TIMED_OUT', 'ERR_TIMED_OUT', 'ERR_ADDRESS_UNREACHABLE', 'ERR_EMPTY_RESPONSE'))
+            raise (DomainUnavailable if transport else SiteError)('페이지 탐색 실패: ' + error)
         deadline = time.monotonic() + self.timeout
         last_navigation_error = ''
         while time.monotonic() < deadline:

@@ -21,6 +21,7 @@ from .domain import announcement_url, DEFAULT_ANNOUNCEMENT, DEFAULT_BASE
 class ModuleBasic(PluginModuleBase):
     db_default = {
         'announcement_url': DEFAULT_ANNOUNCEMENT, 'base_url': DEFAULT_BASE, 'browser_url': 'http://newtoki-browser:9223',
+        'domain_mode': 'legacy_first',
         'download_path': '', 'titles': '', 'request_delay': '3', 'timeout': '30',
         'batch_size': '10', 'batch_pause': '60',
         'episode_digits': '4', 'max_per_title': '10', 'make_epub': 'True',
@@ -63,6 +64,9 @@ class ModuleBasic(PluginModuleBase):
     def validate(raw):
         conf = dict(raw)
         conf['base_url'] = origin(conf['base_url'])
+        conf.setdefault('domain_mode', 'legacy_first')
+        if conf['domain_mode'] not in ('legacy_first', 'legacy_only', 'modern_only'):
+            raise SiteError('주소 사용 방식을 확인하세요.')
         conf['announcement_url'] = announcement_url(conf.get('announcement_url', DEFAULT_ANNOUNCEMENT))
         u = urlsplit(conf['browser_url'])
         if u.scheme not in ('http', 'https') or not u.hostname or u.username or u.password or u.path not in ('', '/') or u.query or u.fragment:
@@ -114,7 +118,7 @@ class ModuleBasic(PluginModuleBase):
 
     def download_finished(self, report):
         state = report['state']
-        self.activity.add('ERROR' if state.get('failed') or state['status'] in ('failed', 'verification_required', 'locked', 'body_pending') else 'INFO',
+        self.activity.add('ERROR' if state.get('failed') or state['status'] in ('failed', 'verification_required', 'limit_reached', 'locked', 'body_pending') else 'INFO',
                           '%s: %s · 완료 %s · 실패 %s · 건너뜀 %s' % (report['source'], state['message'], state.get('completed', 0), state.get('failed', 0), state.get('skipped', 0)))
         for item in report['downloads']:
             self.activity.add('INFO', '%s [%s] / %s. %s 저장 완료' % (item['title'], item['novel_id'], item['no'], item['episode_title']))
@@ -280,7 +284,7 @@ class ModuleBasic(PluginModuleBase):
                 raw = json.loads(arg1 or '{}')
                 if not isinstance(raw, dict):
                     raise SiteError('연결 설정 형식 오류')
-                keys = ('base_url', 'browser_url', 'announcement_url', 'auto_domain')
+                keys = ('base_url', 'browser_url', 'announcement_url', 'auto_domain', 'domain_mode')
                 with self.settings_lock:
                     conf = self.config()
                     conf.update({k: raw[k] for k in keys if k in raw})
@@ -332,7 +336,7 @@ class ModuleBasic(PluginModuleBase):
     def scheduler_function(self):
         try:
             # A challenge/locked state needs explicit user intervention; do not loop.
-            if self._engine().snapshot()['status'] in ('verification_waiting', 'verification_required', 'body_pending', 'locked', 'failed'):
+            if self._engine().snapshot()['status'] in ('verification_waiting', 'verification_required', 'limit_reached', 'body_pending', 'locked', 'failed'):
                 return
             conf = self.runtime()
             conf['source'] = '예약 수집'

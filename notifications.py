@@ -103,7 +103,7 @@ def summary_messages(report):
     source = report.get('source', '수동 다운로드')
     lines = ['북토끼 알리미 · ' + source,
              '결과: %s | 완료 %s · 실패 %s · 건너뜀 %s' % (
-                 {'completed': '완료', 'failed': '오류', 'auth_required': '로그인 필요', 'verification_waiting': '보안 확인 대기', 'verification_required': '보안 확인 필요', 'locked': '잠금 회차', 'body_pending': '본문 대기', 'canceled': '중지'}.get(state['status'], state['status']),
+                 {'completed': '완료', 'failed': '오류', 'auth_required': '로그인 필요', 'verification_waiting': '보안 확인 대기', 'verification_required': '보안 확인 필요', 'limit_reached': '이용 한도 도달', 'locked': '잠금 회차', 'body_pending': '본문 대기', 'canceled': '중지'}.get(state['status'], state['status']),
                  state.get('completed', 0), state.get('failed', 0), state.get('skipped', 0))]
     grouped = {}
     for item in report.get('downloads', []):

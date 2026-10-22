@@ -14,7 +14,18 @@ except ImportError:
     from browser_client import NoRedirect
 
 DEFAULT_ANNOUNCEMENT = 'https://xn--vg1b79zgsf1sj.com/'
-DEFAULT_BASE = 'https://toki35.com'
+DEFAULT_BASE = 'https://newtoki1.org'
+DEFAULT_MODERN = 'https://toki35.com'
+
+
+def domain_candidates(current, legacy, modern, mode='legacy_first', exclude=()):
+    if mode not in ('legacy_first', 'legacy_only', 'modern_only'):
+        raise SiteError('주소 사용 방식을 확인하세요.')
+    old_site = urlsplit(current).hostname.startswith('newtoki')
+    old = ([current] if old_site else []) + legacy + [DEFAULT_BASE]
+    new = ([] if old_site else [current]) + modern + [DEFAULT_MODERN]
+    values = old + new if mode == 'legacy_first' else old if mode == 'legacy_only' else new
+    return [value for value in dict.fromkeys(values) if value not in exclude]
 
 
 def announcement_url(value):
