@@ -14,9 +14,9 @@ import urllib.error
 from urllib.parse import urlsplit, urlunsplit
 
 try:
-    from .parser import SiteError, Blocked, Pending, Cancelled, origin, viewer_config, validate_body, check_page, parse_catalog, CatalogSnapshot, verification_notice
+    from .parser import SiteError, Blocked, Pending, EmptyBody, Cancelled, origin, viewer_config, validate_body, check_page, parse_catalog, CatalogSnapshot, verification_notice
 except ImportError:
-    from parser import SiteError, Blocked, Pending, Cancelled, origin, viewer_config, validate_body, check_page, parse_catalog, CatalogSnapshot, verification_notice
+    from parser import SiteError, Blocked, Pending, EmptyBody, Cancelled, origin, viewer_config, validate_body, check_page, parse_catalog, CatalogSnapshot, verification_notice
 
 
 class NoRedirect(urllib.request.HTTPRedirectHandler):
@@ -76,7 +76,7 @@ BODY_EXPRESSION = r'''(() => {
   const nodes = root ? Array.from(root.children).filter(n => n.tagName !== 'STYLE') : [];
   let gate = {};
   try { gate = JSON.parse(document.getElementById('theme-novel-viewer-data').textContent).paidGate || {}; } catch(e) {}
-  return {rendered: !!root && nodes.length > 0,
+  return {rendered: !!root && nodes.length > 0, empty: !!root && nodes.length === 0,
     text: nodes.map(n => n.innerText || n.textContent || '').join('\n\n'),
     images: root ? root.querySelectorAll('img,svg,canvas,video').length : 0,
     message: notice, title: document.title, locked: gate.active === true || gate.locked === true || !!document.querySelector('[data-theme-novel-unlock]')};
@@ -130,7 +130,7 @@ def modern_dom_body(node):
             walk(c)
     for root in roots:
         walk(root)
-    return dict(rendered=bool(paragraphs), text='\n\n'.join(paragraphs), images=images)
+    return dict(rendered=bool(paragraphs), text='\n\n'.join(paragraphs), images=images, empty=not paragraphs and images == 0)
 
 
 def endpoint(value):
@@ -418,6 +418,7 @@ class BrowserClient:
         if int(meta.get('no') or 0) != int(item['no']):
             raise SiteError('목록과 본문의 회차 번호가 다릅니다.')
         deadline = time.monotonic() + self.timeout
+        last_pending = None
         while time.monotonic() < deadline:
             self.check()
             try:
@@ -426,14 +427,18 @@ class BrowserClient:
                 if meta.get('format') == 'modern':
                     current = self.evaluate('location.href')
             except NavigationPending:
+                last_pending = None
                 self.stop.wait(.5)
                 continue
             if origin(current) != self.base or urlsplit(current).path != path:
                 raise Blocked('본문 로딩 중 다른 페이지로 이동했습니다.')
             try:
                 return validate_body(state)
-            except Pending:
+            except Pending as exc:
+                last_pending = exc
                 self.stop.wait(0.5)
+        if isinstance(last_pending, EmptyBody):
+            raise last_pending
         raise Pending('본문이 표시되지 않았습니다. 전용 브라우저의 해당 탭을 확인하세요.')
 
     def cover(self, url):
@@ -477,3 +482,4 @@ class BrowserClient:
             except Exception:
                 pass
         self.target = None
+

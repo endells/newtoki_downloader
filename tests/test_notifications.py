@@ -71,6 +71,13 @@ class NotificationTests(unittest.TestCase):
                 DiscordNotifier.send(self.url, 'test')
         self.assertNotIn(self.url, str(ctx.exception))
 
+    def test_empty_body_summary_reports_missing_ranges_without_work_link(self):
+        self.report['state']['empty_episodes']=[{'novel_id':'123','title':'시험 작품','no':n} for n in (2,3,7)]
+        text='\n'.join(summary_messages(self.report))
+        self.assertIn('시험 작품 — 본문 없음 · 미저장',text)
+        self.assertIn('회차: 0002-0003, 0007',text)
+        self.assertNotIn('/novel/',text)
+
     def test_sender_payload_has_no_mentions(self):
         class Response:
             status = 200
@@ -109,3 +116,4 @@ class NotificationTests(unittest.TestCase):
         self.assertNotIn(self.url, row['message'])
         self.assertNotIn('secret', row['message'])
         self.assertEqual(row['level'], 'ERROR')
+

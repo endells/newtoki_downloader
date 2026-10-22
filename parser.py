@@ -44,6 +44,10 @@ class Pending(SiteError):
     code = 'body_pending'
 
 
+class EmptyBody(Pending):
+    code = 'missing'
+
+
 class Cancelled(SiteError):
     code = 'canceled'
 
@@ -321,11 +325,17 @@ def validate_body(snapshot):
         raise Locked('로그인 또는 포인트 구매가 필요한 회차입니다.')
     if any(x in title for x in ('just a moment', 'access denied', 'attention required')) or verification_notice(message) or any(x in message for x in ('인증', '검증')):
         raise Blocked('본문 접근 확인이 필요합니다: ' + clean(message)[:180])
+    text = str(snapshot.get('text') or '').replace('\r\n', '\n').strip()
+    empty_notice = '본문이 아직 준비되지 않았습니다.'
+    if (clean(text) == empty_notice or not snapshot.get('rendered') and empty_notice in message
+            or snapshot.get('empty') and not snapshot.get('images')):
+        raise EmptyBody('본문이 아직 준비되지 않았습니다. 빈 본문 회차입니다.')
     if not snapshot.get('rendered'):
         raise Pending('본문이 아직 표시되지 않았습니다.')
     if snapshot.get('images'):
         raise SiteError('삽화가 포함된 회차입니다. 0.1 테스트 버전은 텍스트 회차만 지원하므로 저장하지 않았습니다.')
-    text = str(snapshot.get('text') or '').replace('\r\n', '\n').strip()
+    if not text:
+        raise EmptyBody('표시된 본문 내용이 비어 있습니다.')
     if len(text) < 30 or any(x in text for x in ('본문 불러오는 중...', '본문이 아직 준비되지 않았습니다.', '본문 보안 검증에 실패했습니다.')):
         raise Pending('정상 본문이 아직 준비되지 않았습니다.')
     return text
@@ -345,3 +355,4 @@ def discover_legacy(html, announcement):
     if len(found) != 1:
         raise SiteError('안내 페이지에서 구버전 주소를 하나로 확정하지 못했습니다. 기존 주소를 유지합니다.')
     return found[0]
+

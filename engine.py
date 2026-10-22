@@ -16,11 +16,11 @@ from urllib.parse import urlsplit
 from xml.sax.saxutils import escape
 
 try:
-    from .parser import SiteError, Blocked, Locked, AccessLimited, Pending, Cancelled, parse_catalog, discover_legacy, origin, novel_id
+    from .parser import SiteError, Blocked, Locked, AccessLimited, Pending, EmptyBody, Cancelled, parse_catalog, discover_legacy, origin, novel_id
     from .browser_client import BrowserClient, NoRedirect, CatalogStructureError, DomainUnavailable, BrowserConnectionError
     from .domain import DEFAULT_ANNOUNCEMENT, DEFAULT_BASE, fetch_announcement, discover_candidates, domain_candidates
 except ImportError:
-    from parser import SiteError, Blocked, Locked, AccessLimited, Pending, Cancelled, parse_catalog, discover_legacy, origin, novel_id
+    from parser import SiteError, Blocked, Locked, AccessLimited, Pending, EmptyBody, Cancelled, parse_catalog, discover_legacy, origin, novel_id
     from browser_client import BrowserClient, NoRedirect, CatalogStructureError, DomainUnavailable, BrowserConnectionError
     from domain import DEFAULT_ANNOUNCEMENT, DEFAULT_BASE, fetch_announcement, discover_candidates, domain_candidates
 
@@ -637,6 +637,14 @@ class Engine:
                             self.update(message='잠금 회차에서 수집 중단', done=i + 1)
                             self.export(folder, book, root, config, client)
                             raise
+                        except EmptyBody as exc:
+                            if not self.history.valid(nid, item, root):
+                                self.history.record(nid, item, 'missing', error=str(exc))
+                            empty = self.snapshot().get('empty_episodes', [])
+                            empty.append(dict(novel_id=nid, title=book['title'], no=item['no']))
+                            self.update(skipped=self.snapshot()['skipped'] + 1, warnings=True,
+                                        empty_episodes=empty,
+                                        last_warning='%s / %s회차: 본문 없음 · 미저장으로 남기고 다음 회차를 진행합니다.' % (book['title'], item['no']))
                         except (Blocked, Pending, Cancelled):
                             raise
                         except SiteError as exc:
@@ -647,7 +655,8 @@ class Engine:
                             raise
                         self.update(done=i + 1)
                     self.export(folder, book, root, config, client)
-            self.update(status='completed', message='완료', finished=now())
+            empty_count = len(self.snapshot().get('empty_episodes', []))
+            self.update(status='completed', message=('완료 · 본문 없음 %s회차 미저장' % empty_count) if empty_count else '완료', finished=now())
         except SiteError as exc:
             if client and isinstance(exc, (Blocked, Pending, Locked, AccessLimited)):
                 client.keep_tab = True
@@ -680,3 +689,4 @@ class Engine:
             self.update(message='다운로드 완료 회차로 EPUB 합본 생성 중')
             rows = [r for r in self.history.rows(book['id']) if valid_record(r, root)]
             make_epub(folder, book, rows, client.check, config)
+
