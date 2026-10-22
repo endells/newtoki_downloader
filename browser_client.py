@@ -416,7 +416,7 @@ class BrowserClient:
                 raise Pending('현재 작업 탭의 문서가 아직 준비되지 않았습니다.')
         meta = viewer_config(html, nid, item['id'], expected_no=item['no'])
         if int(meta.get('no') or 0) != int(item['no']):
-            raise SiteError('목록과 본문의 회차 번호가 다릅니다.')
+            raise SiteError('목록과 본문의 회차 번호가 다릅니다: 목록 %s · 본문 %s · 회차 ID %s' % (item['no'], meta.get('no'), item['id']))
         deadline = time.monotonic() + self.timeout
         last_pending = None
         while time.monotonic() < deadline:

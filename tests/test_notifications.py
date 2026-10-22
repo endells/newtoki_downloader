@@ -117,3 +117,33 @@ class NotificationTests(unittest.TestCase):
         self.assertNotIn('secret', row['message'])
         self.assertEqual(row['level'], 'ERROR')
 
+    def test_same_domain_event_sent_once_but_errors_and_downloads_still_sent(self):
+        self.notifier.save({'enabled':True,'url':self.url})
+        event={'old':'https://newtoki1.org','new':'https://toki35.com','time':'2026-10-22T15:00:00+00:00'}
+        self.report['state']['domain_change']=event
+        self.notifier.notify(self.report)
+        self.assertIn('도메인 변경:',self.sent[-1])
+        fresh=DiscordNotifier(self.tmp.name,lambda url,message:self.sent.append(message))
+        self.report['state'].update(status='failed',last_error='확인할 오류',failed=1)
+        self.assertTrue(fresh.notify(self.report))
+        self.assertNotIn('도메인 변경:',self.sent[-1])
+        self.assertIn('확인할 오류',self.sent[-1])
+        self.assertIn('회차: 0001',self.sent[-1])
+        self.assertEqual(self.report['state']['domain_change'],event)
+        self.report['state']['domain_change']=dict(event,old=event['new'],new=event['old'],time='2026-10-23T00:00:00+00:00')
+        fresh.notify(self.report)
+        self.assertIn('도메인 변경:',self.sent[-1])
+
+    def test_failed_domain_notice_is_retried_and_empty_duplicate_is_silent(self):
+        self.notifier.save({'enabled':True,'url':self.url})
+        self.report['state'].update(completed=0,domain_change={'old':'old','new':'new','time':'time'})
+        self.report['downloads']=[]
+        self.notifier.sender=lambda *args:(_ for _ in ()).throw(RuntimeError('offline'))
+        with self.assertRaises(RuntimeError):self.notifier.notify(self.report)
+        self.notifier.sender=lambda url,message:self.sent.append(message)
+        self.assertTrue(self.notifier.notify(self.report))
+        self.assertIn('도메인 변경:',self.sent[-1])
+        count=len(self.sent)
+        self.assertFalse(self.notifier.notify(self.report))
+        self.assertEqual(len(self.sent),count)
+

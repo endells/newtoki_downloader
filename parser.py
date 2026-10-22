@@ -319,12 +319,14 @@ def viewer_config(html, nid, eid, expected_no=None):
             if target.scheme != 'https' or target.path.rstrip('/') != expected:
                 raise SiteError('요청한 회차와 새 뷰어의 회차 ID가 다릅니다.')
             number = re.fullmatch(r'([0-9]+)\s*(?:화|회)?', clean(header.text()))
-            if not number:
-                # The modern heading can be an episode title rather than a number.
-                # The canonical work/episode path above and live URL checks bind it to the catalog.
-                if expected_no is None or not isinstance(expected_no, int) or isinstance(expected_no, bool) or expected_no < 1:
+            if expected_no is not None:
+                # Modern headings are titles, including titles consisting only of digits.
+                # Use the catalog ordinal after binding the exact work/episode ID above.
+                if not isinstance(expected_no, int) or isinstance(expected_no, bool) or expected_no < 1:
                     raise SiteError('제목에 회차 번호가 없습니다. 검증된 목록의 회차 번호가 필요합니다.')
                 return dict(id=str(eid), no=expected_no, title=clean(header.text()), format='modern', number_source='catalog')
+            if not number:
+                raise SiteError('제목에 회차 번호가 없습니다. 검증된 목록의 회차 번호가 필요합니다.')
             return dict(id=str(eid), no=int(number[1]), title=clean(header.text()), format='modern')
         raise SiteError('회차 뷰어 정보를 찾을 수 없습니다.')
     try:

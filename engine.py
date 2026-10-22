@@ -547,7 +547,9 @@ class Engine:
             final_base = client.base
             attempts.append({'url': final_base, 'requested_url': candidate, 'kind': kind, 'status': 'completed', 'message': '작품 목록 정상 확인'})
             self.update(domain_attempts=attempts, base_url=final_base)
-            if final_base != old:
+            if config.get('manual_mode'):
+                self.update(domain_selection=final_base)
+            elif final_base != old:
                 try:
                     save = config.get('save_domain')
                     if save:

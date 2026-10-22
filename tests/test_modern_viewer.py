@@ -68,8 +68,20 @@ class ModernViewer(unittest.TestCase):
         self.assertEqual([call.args[0] for call in c.call.call_args_list],['DOM.getDocument','DOM.querySelector','DOM.describeNode'])
         self.assertTrue(c.call.call_args_list[-1].args[1]['pierce'])
         c.evaluate=Mock(return_value=URL);c.call.reset_mock()
-        with self.assertRaisesRegex(SiteError,'회차 번호'):c.displayed_body('123',dict(id='1001',no=2),viewer())
+        from test_core import viewer as legacy_viewer
+        with self.assertRaisesRegex(SiteError,'목록 2 · 본문 1'):c.displayed_body('123',dict(id='1001',no=2),legacy_viewer())
         c.call.assert_not_called()
+
+    def test_numeric_modern_title_does_not_override_validated_catalog_ordinal(self):
+        for heading in ('370','370화','제목'):
+            html=viewer().replace('1화',heading)
+            meta=viewer_config(html,'123','1001',expected_no=378)
+            self.assertEqual((meta['no'],meta['number_source']),(378,'catalog'))
+            c=BrowserClient(BASE,'http://127.0.0.1:9222')
+            c.evaluate=Mock(side_effect=[URL,URL,{'title':'테스트','message':'','locked':False},URL])
+            c.call=Mock(side_effect=[{'root':{'nodeId':1}},{'nodeId':2},{'node':closed_tree()}])
+            self.assertEqual(c.displayed_body('123',dict(id='1001',no=378),html),TEXT)
+            with self.assertRaises(SiteError):viewer_config(html,'123','1002',expected_no=378)
 
     def test_security_and_purchase_notices_stop_before_dom_read(self):
         c=BrowserClient(BASE,'http://127.0.0.1:9222');c.call=Mock()
@@ -83,3 +95,4 @@ class ModernViewer(unittest.TestCase):
         c.evaluate=Mock(side_effect=[URL,URL,{'title':'테스트','message':''},BASE+'/novel/123/1002'])
         c.call=Mock(side_effect=[{'root':{'nodeId':1}},{'nodeId':2},{'node':closed_tree()}])
         with self.assertRaises(Blocked):c.displayed_body('123',dict(id='1001',no=1),viewer())
+

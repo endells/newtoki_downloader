@@ -66,6 +66,20 @@ class ManualMode(unittest.TestCase):
 class ManualModeEngine(unittest.TestCase):
     setUp = fixtures.EngineTests.setUp
 
+    def test_manual_modern_analysis_is_selection_not_saved_domain_change(self):
+        c=fixtures.FakeClient(fixtures.BASE)
+        self.engine.factory=lambda *args:c
+        save=Mock()
+        self.config.update(auto_domain=True,domain_mode='modern_only',manual_mode='modern_only',save_domain=save)
+        with patch('engine.fetch_announcement',return_value=('<a href="https://toki35.com">신버전 바로가기</a>','https://notice.example/')):
+            self.engine.start('analyze',['123'],self.config)
+            self.engine.thread.join(3)
+        state=self.engine.snapshot()
+        self.assertEqual(state['status'],'completed',state)
+        self.assertEqual(state['domain_selection'],'https://toki35.com')
+        self.assertNotIn('domain_change',state)
+        save.assert_not_called()
+
     def test_manual_legacy_ignores_same_day_modern_preference_and_keeps_daily_gate(self):
         from parser import DailyVerificationRequired
         import time

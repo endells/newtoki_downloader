@@ -146,6 +146,7 @@ def summary_messages(report):
 class DiscordNotifier:
     def __init__(self, directory, sender=None):
         self.path = Path(directory) / 'newtoki_downloader_discord.json'
+        self.domain_notice_path = Path(directory) / 'newtoki_downloader_domain_notice.json'
         self.sender = sender or self.send
         self.lock = threading.RLock()
 
@@ -201,14 +202,27 @@ class DiscordNotifier:
     def notify(self, report):
         with self.lock:
             conf = self.settings()
-        if not conf['enabled']:
-            return False
-        state = report['state']
-        if not state.get('completed') and not state.get('failed') and state['status'] == 'completed' and not state.get('warnings') and not state.get('domain_change') and not state.get('history_imported'):
-            return False
-        for message in summary_messages(report):
-            self.sender(conf['url'], message)
-        return True
+            if not conf['enabled']:
+                return False
+            state = dict(report['state'])
+            change = state.get('domain_change')
+            event = None
+            if change:
+                event = [change.get('old'), change.get('new'), change.get('time')]
+                try:
+                    previous = json.loads(self.domain_notice_path.read_text(encoding='utf-8'))
+                except (OSError, ValueError):
+                    previous = None
+                if event == previous:
+                    state.pop('domain_change', None)
+                    event = None
+            if not state.get('completed') and not state.get('failed') and state['status'] == 'completed' and not state.get('warnings') and not state.get('domain_change') and not state.get('history_imported'):
+                return False
+            for message in summary_messages(dict(report, state=state)):
+                self.sender(conf['url'], message)
+            if event is not None:
+                atomic_write(self.domain_notice_path, json.dumps(event).encode('utf-8'))
+            return True
 
     def test(self):
         conf = self.settings()
