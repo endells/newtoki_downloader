@@ -61,7 +61,7 @@
 @media(max-width:650px){.nt-grid{grid-template-columns:1fr}.nt-card{padding:12px}.nt{padding:12px 8px}.nt .nt-scroll table td,.nt .nt-scroll table th{padding:7px;font-size:12px}}
 </style>
 <main class="nt">
-<h3>북토끼 소설 다운 <span class="badge">v0.2.24 · 테스트</span></h3>
+<h3>북토끼 소설 다운 <span class="badge">v0.2.25 · 테스트</span></h3>
 <section class="nt-status" aria-label="작업 상태">
  <div class="nt-row"><strong>작업 상태</strong><span id="state" class="nt-state" role="status">확인 중</span><button id="resume" class="primary" hidden>확인 후 계속</button><button id="stop" disabled>중지</button></div>
  <div id="verification-help" class="nt-note" hidden></div><div id="counts"></div><progress id="progress" value="0" max="1"></progress><div id="error" class="nt-error"></div><div id="domain-change"></div><div id="domain-attempts" class="nt-msg"></div>
@@ -70,6 +70,7 @@
 <div id="message" class="nt-msg" role="status"></div>
 {% if page == 'setting' %}
 <section class="nt-card">
+<div class="nt-actions"><button id="save-top" class="primary">설정 저장</button><button id="run-top" data-work>지금 받기</button></div>
 <label for="titles">자동 수집 작품 번호 또는 주소 — 한 줄에 하나</label><textarea id="titles" rows="5">{{ config.titles }}</textarea>
 <div class="nt-actions"><input id="add-title" type="text" placeholder="추가할 작품 주소 또는 번호"><button id="register-title">작품 추가</button><button id="refresh-titles">목록 새로고침</button></div>
 <small>목록에 추가해도 즉시 다운로드하지 않습니다. 새로고침은 저장된 목록을 읽습니다.</small>
@@ -210,10 +211,12 @@ bind('folder-up',async()=>browsePath(folderParent));
 bind('folder-close',()=>{$('folder-picker').hidden=true;});
 bind('folder-choose',()=>{$('download_path').value=folderPath;$('folder-picker').hidden=true;$('path-result').textContent='선택한 경로: '+folderPath+' · 설정 저장을 눌러 적용하세요.';});
 bind('check-path',async()=>{$('path-result').textContent=(await post('check_path',$('download_path').value)).storage.message;});
-bind('save',async()=>{const data={};{% for key in config %}if($({{key|tojson}})){const el=$({{key|tojson}});data[{{key|tojson}}]=el.type==='checkbox'?el.checked:el.value;}{% endfor %}msg((await post('save',JSON.stringify(data))).msg);});
+async function saveSettings(){const data={};{% for key in config %}if($({{key|tojson}})){const el=$({{key|tojson}});data[{{key|tojson}}]=el.type==='checkbox'?el.checked:el.value;}{% endfor %}msg((await post('save',JSON.stringify(data))).msg);}
+bind('save',saveSettings);bind('save-top',saveSettings);
 bind('save-connection',async()=>{const data={};for(const key of ['base_url','browser_url','announcement_url','auto_domain','domain_mode']){const el=$(key);data[key]=el.type==='checkbox'?el.checked:el.value;}msg((await post('save_connection',JSON.stringify(data))).msg);});
 bind('browser-check',async()=>{const button=$('browser-check'),result=$('browser-check-result');button.disabled=true;result.textContent='전용 브라우저 연결 확인 중…';try{result.textContent=(await post('browser_check',$('browser_url').value)).msg;}catch(e){result.textContent=e.message;throw e;}finally{button.disabled=false;}});
-bind('run',async()=>msg((await post('run')).msg));bind('domain',async()=>msg((await post('domain',$('probe').value)).msg));
+async function runNow(){msg((await post('run')).msg);}
+bind('run',runNow);bind('run-top',runNow);bind('domain',async()=>msg((await post('domain',$('probe').value)).msg));
 bind('analyze',async()=>{const d=await post('analyze',$('novel').value);analysis=null;rendered='';$('episodes').replaceChildren();$('book-title').textContent='작품과 저장 파일 확인 중';count();msg(d.msg);});bind('add-auto',async()=>msg((await post('add_auto',$('novel').value)).msg));
 
 bind('select-range',()=>{const a=Number($('range-from').value),b=Number($('range-to').value);if(!Number.isInteger(a)||!Number.isInteger(b)||a<1||b<a)throw new Error('시작·끝 회차를 올바르게 입력하세요.');document.querySelectorAll('#episodes input').forEach(x=>x.checked=!x.disabled&&Number(x.dataset.no)>=a&&Number(x.dataset.no)<=b);count();});
