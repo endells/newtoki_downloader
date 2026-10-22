@@ -25,6 +25,10 @@ class Blocked(SiteError):
     code = 'verification_required'
 
 
+class DailyVerificationRequired(Blocked):
+    """Explicit daily verification notice; distinct from a hard usage limit."""
+
+
 class Locked(SiteError):
     code = 'locked'
 
@@ -148,11 +152,17 @@ def verification_notice(text):
     return any(marker in str(text) for marker in ('퍼즐 조각을 맞춰', '봇 확인 후', '밀어서 맞추기', '인증이 필요', '인증 후', '보안 검증', 'Verify you are human', 'KR_ONLY'))
 
 
+def check_daily_verification(text):
+    if re.search(r'일일\s*조회\s*인증(?:이|을)?\s*필요', clean(str(text))):
+        raise DailyVerificationRequired('일일 조회 인증이 필요합니다. 뷰어에서 직접 인증해야 합니다.')
+
+
 def check_page(html):
     doc = Document(html)
     loading = doc.first(cls='novel-loading')
     if loading:
         check_limit(loading.text())
+        check_daily_verification(loading.text())
     if loading and verification_notice(clean(loading.text())):
         raise Blocked('본문 인증이 필요합니다: ' + clean(loading.text())[:180])
     title = doc.first(tag='title')
@@ -162,6 +172,7 @@ def check_page(html):
     if not known_site:
         visible = doc.text()
         check_limit(visible)
+        check_daily_verification(visible)
         if any(x in visible for x in ('로그인이 필요합니다', '로그인 후 이용', '로그인 후 열람', '구매 후 열람')):
             raise Locked('로그인 또는 구매가 필요한 페이지입니다. 다른 주소로 자동 전환하지 않습니다.')
         if 'KR_ONLY' in visible:
@@ -323,6 +334,9 @@ def validate_body(snapshot):
     title = str(snapshot.get('title') or '').lower()
     if snapshot.get('locked'):
         raise Locked('로그인 또는 포인트 구매가 필요한 회차입니다.')
+    if any(x in title for x in ('just a moment', 'access denied', 'attention required')):
+        raise Blocked('사이트 보안 확인이 필요합니다. 현재 뷰어에서 직접 확인하세요.')
+    check_daily_verification(message)
     if any(x in title for x in ('just a moment', 'access denied', 'attention required')) or verification_notice(message) or any(x in message for x in ('인증', '검증')):
         raise Blocked('본문 접근 확인이 필요합니다: ' + clean(message)[:180])
     text = str(snapshot.get('text') or '').replace('\r\n', '\n').strip()

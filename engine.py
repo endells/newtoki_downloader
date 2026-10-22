@@ -10,25 +10,29 @@ import threading
 import time
 import urllib.request
 import zipfile
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from urllib.parse import urlsplit
 from xml.sax.saxutils import escape
 
 try:
-    from .parser import SiteError, Blocked, Locked, AccessLimited, Pending, EmptyBody, Cancelled, parse_catalog, discover_legacy, origin, novel_id
+    from .parser import SiteError, Blocked, DailyVerificationRequired, Locked, AccessLimited, Pending, EmptyBody, Cancelled, parse_catalog, discover_legacy, origin, novel_id
     from .browser_client import BrowserClient, NoRedirect, CatalogStructureError, DomainUnavailable, BrowserConnectionError
-    from .domain import DEFAULT_ANNOUNCEMENT, DEFAULT_BASE, fetch_announcement, discover_candidates, domain_candidates
+    from .domain import DEFAULT_ANNOUNCEMENT, DEFAULT_BASE, DEFAULT_MODERN, fetch_announcement, discover_candidates, domain_candidates
 except ImportError:
-    from parser import SiteError, Blocked, Locked, AccessLimited, Pending, EmptyBody, Cancelled, parse_catalog, discover_legacy, origin, novel_id
+    from parser import SiteError, Blocked, DailyVerificationRequired, Locked, AccessLimited, Pending, EmptyBody, Cancelled, parse_catalog, discover_legacy, origin, novel_id
     from browser_client import BrowserClient, NoRedirect, CatalogStructureError, DomainUnavailable, BrowserConnectionError
-    from domain import DEFAULT_ANNOUNCEMENT, DEFAULT_BASE, fetch_announcement, discover_candidates, domain_candidates
+    from domain import DEFAULT_ANNOUNCEMENT, DEFAULT_BASE, DEFAULT_MODERN, fetch_announcement, discover_candidates, domain_candidates
 
 ANNOUNCEMENT = DEFAULT_ANNOUNCEMENT
 
 
 def now():
     return datetime.now(timezone.utc).isoformat(timespec='seconds')
+
+
+def korean_day():
+    return datetime.fromisoformat(now()).astimezone(timezone(timedelta(hours=9))).date().isoformat()
 
 
 def safe_name(text):
@@ -256,6 +260,7 @@ class Engine:
         self.on_event = None
         self.on_verification = None
         self.history.query('CREATE TABLE IF NOT EXISTS books (id TEXT PRIMARY KEY, title TEXT, author TEXT, updated TEXT)')
+        self.history.query('CREATE TABLE IF NOT EXISTS verified_domain_handoff (id INTEGER PRIMARY KEY CHECK(id=1), day TEXT, base TEXT)')
         self.state = {'status': 'idle', 'message': '대기 중', 'completed': 0, 'skipped': 0, 'failed': 0}
 
     def book_info(self, nid):
@@ -311,6 +316,7 @@ class Engine:
                 client.keep_tab = True
                 self.resume_signal.clear()
                 self.update(status='verification_waiting', last_error=str(exc), episode_no=None,
+                            verification_context='',
                             verification_url=client.base + path,
                             message='작품 목록 보안 확인 대기 · 전용 브라우저의 현재 탭에서 직접 확인 후 계속을 누르세요.')
                 if self.on_verification and not announced:
@@ -326,14 +332,61 @@ class Engine:
                 self.update(status='running', last_error='', message='확인한 작업 탭에서 작품 목록 읽는 중')
                 resumed = True
 
+    def open_manual_handoff(self, client, nid, item, config):
+        """Navigate once to the modern viewer, then require an explicit human resume."""
+        previous = client.base
+        day = korean_day()
+        try:
+            html, source = fetch_announcement(config.get('announcement_url', ANNOUNCEMENT), client.check)
+            _, modern = discover_candidates(html, source)
+        except Cancelled:
+            raise
+        except SiteError as exc:
+            modern = []
+            self.update(warnings=True, last_warning='새주소 안내 확인 실패: ' + str(exc))
+        client.base = modern[0] if modern else DEFAULT_MODERN
+        try:
+            client.html('/novel/%s/%s' % (nid, item['id']))
+        except Blocked:
+            pass  # The human must complete this visible destination's verification.
+        except Exception:
+            client.base = previous
+            raise
+        if not urlsplit(client.base).hostname.startswith('toki'):
+            client.base = previous
+            raise SiteError('새주소 뷰어로 이동하지 못했습니다.')
+        client.keep_tab = True
+        return {'base': previous, 'day': day}
+
+    def confirm_manual_handoff(self, client, nid, item, config, previous):
+        """After human confirmation, validate work/catalog before accepting the new route."""
+        alternate = collect_catalog(client, nid, self.update, lambda path: self.read_page(client, path, catalog=True))
+        if alternate['title'] != self.book_info(nid)['title']:
+            raise SiteError('새주소의 작품 제목이 기존 작품과 다릅니다. 이어받기를 중단합니다.')
+        match = next((e for e in alternate['episodes'] if e['id'] == item['id']), None)
+        if not match or match['no'] != item['no']:
+            raise SiteError('새주소의 회차 ID/번호가 다릅니다. 다시 작품 분석을 실행하세요.')
+        if match['locked']:
+            raise Locked('새주소에서 해당 회차가 잠겨 있습니다.')
+        save = config.get('save_domain')
+        if save:
+            save(client.base)
+        self.history.query('INSERT OR REPLACE INTO verified_domain_handoff VALUES (1,?,?)', (previous['day'], client.base))
+        self.update(base_url=client.base, domain_change={'old': previous['base'], 'new': client.base, 'time': now()},
+                    verification_context='', last_error='', message='새주소 직접 인증과 작품·회차 확인 완료 · 이어받습니다.')
+
     def read_body(self, client, nid, item, on_wait=None, config=None):
         resumed, retries, announced = False, 0, False
         switched = False
+        handoff_previous = None
         while True:
             self.stop_check()
             client.check()
             try:
                 text = client.continue_body(nid, item) if resumed else client.body(nid, item)
+                if handoff_previous is not None:
+                    self.confirm_manual_handoff(client, nid, item, config, handoff_previous)
+                    handoff_previous = None
                 client.keep_tab = False
                 return text
             except Blocked as exc:
@@ -347,9 +400,16 @@ class Engine:
                         raise
                     except Exception as export_error:
                         self.update(last_warning='대기 전 EPUB 저장 실패: ' + type(export_error).__name__)
+                if (isinstance(exc, DailyVerificationRequired) and not switched and config
+                        and config.get('auto_domain') and config.get('domain_mode', 'legacy_first') == 'legacy_first'
+                        and urlsplit(client.base).hostname.startswith('newtoki')):
+                    switched = True
+                    handoff_previous = self.open_manual_handoff(client, nid, item, config)
+                    self.update(base_url=client.base, verification_context='modern_handoff')
+                handoff_wait = handoff_previous is not None
                 self.update(status='verification_waiting', last_error=str(exc),
                             verification_url=client.base + '/novel/%s/%s' % (nid, item['id']),
-                            message='보안 확인 대기 · 현재 %s회차 / %s편 저장 완료 · 전용 브라우저에서 확인 후 계속을 누르세요.' % (item['no'], self.snapshot().get('completed', 0)))
+                            message=('새주소 직접 인증 대기' if handoff_wait else '보안 확인 대기') + ' · 현재 %s회차 / %s편 저장 완료 · 전용 브라우저에서 인증 후 확인 후 계속을 누르세요.' % (item['no'], self.snapshot().get('completed', 0)))
                 if self.on_verification and not announced:
                     try:
                         self.on_verification(self.snapshot())
@@ -377,6 +437,18 @@ class Engine:
                 if match['locked']:
                     raise Locked('대체 주소에서 해당 회차가 잠겨 있습니다.')
             except Pending:
+                if handoff_previous is not None:
+                    self.resume_signal.clear()
+                    client.keep_tab = True
+                    self.update(status='verification_waiting',
+                                message='새주소 본문이 아직 준비되지 않았습니다. 직접 인증과 본문 표시를 확인한 뒤 계속을 누르세요.')
+                    while not self.resume_signal.wait(.5):
+                        self.stop_check()
+                        client.check()
+                    self.stop_check()
+                    self.update(status='running', last_error='', message='새주소의 현재 회차를 다시 확인합니다.')
+                    resumed = True
+                    continue
                 if retries >= 1:
                     raise
                 retries += 1
@@ -442,7 +514,12 @@ class Engine:
             legacy, modern = [], []
             warning = str(exc) + ' 현재 저장 주소의 작품 목록을 확인합니다.'
             self.update(warnings=True, last_warning=warning)
-        candidates = domain_candidates(old, legacy, modern, config.get('domain_mode', 'legacy_first'), exclude)
+        mode = config.get('domain_mode', 'legacy_first')
+        confirmed = self.history.query('SELECT base FROM verified_domain_handoff WHERE id=1 AND day=?', (korean_day(),))
+        current = old
+        if mode == 'legacy_first' and confirmed:
+            current, mode = origin(confirmed[0]['base']), 'modern_only'
+        candidates = domain_candidates(current, legacy, modern, mode, exclude)
         attempts, errors = [], []
         expected_title = self.book_info(nid)['title']
         for candidate in candidates:
