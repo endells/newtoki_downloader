@@ -52,7 +52,7 @@ class FileManagerTests(unittest.TestCase):
         report=manage_files(self.root,self.history,selected_folders=chosen)
         rebuild_epubs(self.root,self.history,{},report,selected_folders=chosen)
         self.assertEqual(report['epub_created'],1)
-        with zipfile.ZipFile(self.folder/'작품.epub') as z:
+        with zipfile.ZipFile(self.folder/'작품 001~001.epub') as z:
             self.assertIn('OEBPS/chapter-1001.xhtml',z.namelist())
         self.assertEqual(self.history.rows('456')[0]['digest'],'old-digest')
         self.assertEqual((other/'다른 작품.epub').read_bytes(),b'keep epub')
@@ -152,7 +152,7 @@ class NewNames(unittest.TestCase):
         import zipfile
         self.run_job(['1001'])
         folder=next((self.root/'books').iterdir())
-        (folder/'002_외부 회차.txt').write_text('외부에서 넣은 두 번째 본문',encoding='utf-8')
+        (folder/'002_외부 회차 (완료).txt').write_text('외부에서 넣은 두 번째 본문',encoding='utf-8')
         (folder/'003_빈 회차.txt').write_bytes(b'')
         (folder/'cover.jpg').write_bytes(b'\xff\xd8\xfftest-cover')
         epub=folder/'테스트 작품.epub';epub.write_bytes(b'old epub')
@@ -165,6 +165,8 @@ class NewNames(unittest.TestCase):
         self.assertEqual(state['file_report']['epub_created'],1)
         self.assertEqual(state['file_report']['epub_failed'],0)
         self.assertEqual(before,{p.name:p.read_bytes() for p in folder.glob('*.txt')})
+        epub=folder/'테스트 작품 001~002 완료.epub'
+        self.assertEqual(state['file_report']['rows'][-1]['target'],str(epub))
         with zipfile.ZipFile(epub) as z:
             self.assertIn('OEBPS/chapter-1002.xhtml',z.namelist())
             self.assertNotIn('OEBPS/chapter-1003.xhtml',z.namelist())

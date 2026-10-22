@@ -171,10 +171,10 @@ def manage_files(root, history, apply=False, check=lambda: None, update=lambda *
 def rebuild_epubs(root, history, config, report, check=lambda: None, update=lambda **kw: None, selected_folders=None):
     """Rebuild from reconciled local files only, without renaming or browsing."""
     try:
-        from .engine import make_epub, safe_name
+        from .engine import make_epub, epub_filename
         from .parser import Cancelled
     except ImportError:
-        from engine import make_epub, safe_name
+        from engine import make_epub, epub_filename
         from parser import Cancelled
     root = Path(root).resolve()
     catalogs = {str(b['id']): b for b in history.catalogs()}
@@ -204,7 +204,7 @@ def rebuild_epubs(root, history, config, report, check=lambda: None, update=lamb
                 if not metadata_matches(folder, nid):
                     raise SiteError('작품 메타데이터가 일치하지 않아 EPUB 생성 제외')
                 book.update(json.loads(meta.read_text(encoding='utf-8')))
-            target = safe_path(folder, safe_name(book['title']) + '.epub')
+            target = safe_path(folder, epub_filename(book, rows))
             update(message='EPUB 다시 생성 중: ' + book['title'])
             make_epub(folder, book, rows, check, config)
             report['epub_created'] += 1

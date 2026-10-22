@@ -146,8 +146,37 @@ def valid_record(row, root):
         return False
 
 
+def epub_filename(book, records):
+    first = min(int(row['no']) for row in records)
+    last = max(records, key=lambda row: int(row['no']))
+    marker = re.search(r'(?:^|[\s_\-\[(【])(완료|완)[\s\])】.!_\-]*$', Path(last['path']).stem)
+    suffix = ' %03d~%03d' % (first, int(last['no']))
+    return safe_name(book['title']) + suffix + (' ' + marker[1] if marker else '') + '.epub'
+
+
+def remove_previous_epubs(folder, book, target):
+    """Replace only our own earlier generated editions, never unrelated user EPUBs."""
+    import xml.etree.ElementTree as ET
+    pattern = re.compile(re.escape(safe_name(book['title'])) + r'(?: [0-9]{3,}~[0-9]{3,}(?: (?:완료|완))?)?\.epub$')
+    for path in Path(folder).glob('*.epub'):
+        if path == target or path.is_symlink() or not pattern.fullmatch(path.name):
+            continue
+        try:
+            with zipfile.ZipFile(path) as z:
+                if z.getinfo('OEBPS/content.opf').file_size > 512 * 1024:
+                    continue
+                opf = ET.fromstring(z.read('OEBPS/content.opf'))
+            identifier = opf.find('.//{http://purl.org/dc/elements/1.1/}identifier[@id="book-id"]')
+            title = opf.find('.//{http://purl.org/dc/elements/1.1/}title')
+            if identifier is not None and identifier.text == 'newtoki:' + str(book['id']) and title is not None and title.text == book['title']:
+                path.unlink()
+        except (OSError, KeyError, ValueError, zipfile.BadZipFile, ET.ParseError):
+            continue
+
+
 def make_epub(folder, book, records, check=lambda: None, config=None):
     config = config or {}
+    records = sorted(records, key=lambda row: int(row['no']))
     if not records:
         return
     buffer = io.BytesIO()
@@ -188,7 +217,10 @@ def make_epub(folder, book, records, check=lambda: None, config=None):
         z.writestr('OEBPS/nav.xhtml', '<?xml version="1.0" encoding="utf-8"?><html xmlns="http://www.w3.org/1999/xhtml" xmlns:epub="http://www.idpf.org/2007/ops"><head><title>목차</title></head><body><nav epub:type="toc"><ol>' + ''.join(nav) + '</ol></nav></body></html>')
         z.writestr('OEBPS/content.opf', '<?xml version="1.0" encoding="utf-8"?><package xmlns="http://www.idpf.org/2007/opf" version="3.0" unique-identifier="book-id"><metadata xmlns:dc="http://purl.org/dc/elements/1.1/"><dc:identifier id="book-id">newtoki:' + book['id'] + '</dc:identifier><dc:title>' + escape(book['title']) + '</dc:title><dc:creator>' + escape(book.get('author') or '') + '</dc:creator><dc:language>ko</dc:language><meta property="dcterms:modified">' + datetime.now(timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ') + '</meta>' + cover_meta + '<dc:description>' + escape(book.get('description', '')) + '</dc:description></metadata><manifest><item id="nav" href="nav.xhtml" properties="nav" media-type="application/xhtml+xml"/>' + ''.join(manifest) + '</manifest><spine>' + ''.join(spine) + '</spine></package>')
     check()
-    atomic_write(safe_path(folder, safe_name(book['title']) + '.epub'), buffer.getvalue())
+    target = safe_path(folder, epub_filename(book, records))
+    atomic_write(target, buffer.getvalue())
+    remove_previous_epubs(folder, book, target)
+    return target
 
 
 def image_type(data):

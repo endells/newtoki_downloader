@@ -19,7 +19,7 @@ class Features(unittest.TestCase):
         (folder/'cover.png').write_bytes(b'\x89PNG\r\n\x1a\nfixture')
         book={'id':'123','title':'테스트','description':'소개 & 설명'}
         make_epub(folder,book,self.engine.history.rows('123'),config={'epub_line_height':2.2,'epub_paragraph_gap':.8})
-        with zipfile.ZipFile(folder/'테스트.epub') as z:
+        with zipfile.ZipFile(folder/'테스트 001~001.epub') as z:
             opf=ET.fromstring(z.read('OEBPS/content.opf'))
             self.assertIn(b'cover-image',z.read('OEBPS/content.opf'))
             self.assertIn(b'line-height:2.2',z.read('OEBPS/chapter-1001.xhtml'))
