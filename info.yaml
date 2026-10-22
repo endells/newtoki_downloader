@@ -1,7 +1,7 @@
 package_name: newtoki_downloader
 title: 북토끼 소설 다운
 description: 구주소 우선 · 새주소 통합 · 전용 브라우저의 공개 텍스트 회차 저장
-version: 0.2.31
+version: 0.2.32
 developer: endells
 home: https://github.com/endells/newtoki_downloader
 

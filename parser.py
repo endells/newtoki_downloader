@@ -264,8 +264,13 @@ def parse_modern_catalog(doc, url):
         href = urljoin(base, link.attrs.get('href', ''))
         target = urlsplit(href)
         match = re.fullmatch(r'/novel/' + re.escape(nid) + r'/([1-9][0-9]*)/?', target.path)
+        pending = ('novel-ep--not-ready' in row.attrs.get('class', '').split()
+                   and link.attrs.get('aria-disabled') == 'true')
+        pending_id = row.attrs.get('data-episode-id', '')
+        pending_list_link = (pending and target.path.rstrip('/') == '/novel/' + nid
+                             and re.fullmatch(r'[1-9][0-9]*', pending_id))
         no = re.fullmatch(r'([0-9]+|[1-9][0-9]{0,2}(?:,[0-9]{3})+)\s*(?:화|회)?', clean(number.text()))
-        if not match:
+        if not match and not pending_list_link:
             raise SiteError('새 목록의 작품/회차 경로가 다릅니다: 요청 작품 %s · 링크 경로 %s' % (nid, target.path[:100]))
         if not no:
             raise SiteError('새 목록의 회차 번호 형식을 확인하지 못했습니다: ' + clean(number.text())[:40])
@@ -275,7 +280,7 @@ def parse_modern_catalog(doc, url):
             raise SiteError('새 목록의 도메인이 다릅니다: 현재 %s · 링크 %s' % (urlsplit(base).hostname, target.hostname))
         # An advertised older toki host can remain in links after a normal redirect.
         # Keep its validated work/episode path, and navigate only on the current host.
-        eid, value = match[1], int(no[1].replace(',', ''))
+        eid, value = match[1] if match else pending_id, int(no[1].replace(',', ''))
         if row.attrs.get('data-episode-id', eid) != eid or row.attrs.get('data-ep', str(value)) != str(value):
             raise SiteError('새 목록의 표시 회차와 데이터가 일치하지 않습니다.')
         if eid in seen or value in numbers:
@@ -283,7 +288,8 @@ def parse_modern_catalog(doc, url):
         seen.add(eid);numbers.add(value)
         badges = list(row.walk(cls='paid-badge'))
         locked = bool(row.first(cls='fa-lock') or row.first(cls='ne-lock')) or row.attrs.get('data-locked') == 'true' or any(any(x in clean(b.text()) for x in ('유료','구매','포인트')) for b in badges)
-        episodes.append(dict(id=eid, no=value, title=clean(label.text()), locked=locked, url=base + target.path))
+        episodes.append(dict(id=eid, no=value, title=clean(label.text()), locked=locked,
+                             pending=pending, url='' if pending else base + target.path))
     if not episodes:
         raise SiteError('회차 목록이 비어 있습니다.')
     meta = detail.first(cls='nd-meta')

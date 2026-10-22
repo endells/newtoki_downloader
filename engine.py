@@ -133,7 +133,7 @@ class History:
 
     def cache_catalog(self, book):
         data = {k: v for k, v in book.items() if k != 'episodes'}
-        data['episodes'] = [{k: e.get(k) for k in ('id', 'no', 'title', 'locked')} for e in book['episodes']]
+        data['episodes'] = [{k: e.get(k) for k in ('id', 'no', 'title', 'locked', 'pending')} for e in book['episodes']]
         self.query('INSERT OR REPLACE INTO catalogs VALUES (?,?,?)', (book['id'], json.dumps(data, ensure_ascii=False), now()))
 
     def catalogs(self):
@@ -367,6 +367,8 @@ class Engine:
                     verification_context='', last_error='', message='새주소 목록과 기존 저장 파일 확인 완료 · 남은 회차를 이어받습니다.')
 
     def read_body(self, client, nid, item, on_wait=None, config=None):
+        if item.get('pending'):
+            raise EmptyBody('목록에 준비중으로 표시된 회차입니다. 본문 요청 없이 미저장으로 남깁니다.')
         resumed, retries, announced = False, 0, False
         switched = False
         while True:
