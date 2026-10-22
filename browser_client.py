@@ -10,6 +10,7 @@ import re
 import threading
 import time
 import urllib.request
+import urllib.error
 from urllib.parse import urlsplit, urlunsplit
 
 try:
@@ -29,6 +30,31 @@ class NavigationPending(SiteError):
 
 class DomainUnavailable(SiteError):
     """DNS/transport failure only; never authentication, HTTP limits or browser disconnects."""
+
+
+class BrowserConnectionError(SiteError):
+    """The common CDP service failed, independently of the site's domain."""
+
+
+def connection_failure(exc, address, stage):
+    if isinstance(exc, urllib.error.HTTPError):
+        detail = 'HTTP %s' % exc.code
+        hint = ('CDP 중계 서비스 또는 Chromium 쪽 응답 실패입니다. 브라우저와 중계 컨테이너 로그를 확인하세요.' if exc.code in (502, 503, 504)
+                else '이 포트가 CDP 중계 포트인지 확인하세요. 브라우저 화면용 포트와 다릅니다.' if exc.code in (404, 405)
+                else 'CDP 중계 서비스의 요청 허용 설정과 로그를 확인하세요.')
+    else:
+        reason = exc.reason if isinstance(exc, urllib.error.URLError) else exc
+        if isinstance(reason, socket.gaierror):
+            detail, hint = '호스트 이름 해석 실패', 'FF와 브라우저가 같은 Docker 네트워크인지, 컨테이너 이름이 맞는지 확인하세요.'
+        elif isinstance(reason, ConnectionRefusedError):
+            detail, hint = '연결 거부', '브라우저/CDP 중계 컨테이너의 실행 상태와 설정한 포트를 확인하세요.'
+        elif isinstance(reason, (TimeoutError, socket.timeout)):
+            detail, hint = '연결 시간 초과', 'FF에서 해당 브라우저 주소로 통신 가능한지 확인하세요.'
+        elif isinstance(reason, (ValueError, UnicodeError)):
+            detail, hint = 'CDP JSON 응답 형식 오류', '브라우저 화면용 포트 대신 CDP 중계 포트를 입력하세요.'
+        else:
+            detail, hint = type(reason).__name__ + ': ' + browser_detail(reason), '브라우저/CDP 중계 컨테이너 로그를 확인하세요.'
+    return BrowserConnectionError('전용 브라우저 연결 실패 [%s · %s]: %s. %s 사이트 도메인은 변경하지 않습니다.' % (stage, address, detail, hint))
 
 
 class CatalogStructureError(SiteError):
@@ -117,7 +143,7 @@ def endpoint(value):
         if not addresses or any(not (ipaddress.ip_address(x[4][0]).is_private or ipaddress.ip_address(x[4][0]).is_loopback) for x in addresses):
             raise ValueError()
     except (OSError, ValueError):
-        raise SiteError('브라우저 주소를 내부 IP로 확인하지 못했습니다. 컨테이너 네트워크/주소를 확인하세요.') from None
+        raise BrowserConnectionError('브라우저 호스트 %s를 내부 IP로 확인하지 못했습니다. FF와 브라우저의 Docker 네트워크/주소를 확인하세요.' % u.hostname) from None
     return urlunsplit((u.scheme, u.netloc, '', '', ''))
 
 
@@ -141,9 +167,19 @@ class BrowserClient:
                 raw = response.read(1024 * 1024 + 1)
             if len(raw) > 1024 * 1024:
                 raise ValueError()
-            return json.loads(raw.decode('utf-8'))
-        except Exception:
-            raise SiteError('Chromium 연결 실패. 브라우저 컨테이너와 CDP 주소/포트(9223)를 확인하세요.') from None
+            data = json.loads(raw.decode('utf-8'))
+            if not isinstance(data, dict):
+                raise ValueError('CDP object expected')
+            return data
+        except Exception as exc:
+            raise connection_failure(exc, self.address, method + ' ' + path.split('?', 1)[0]) from None
+
+    def check_connection(self):
+        """Read only the CDP version endpoint; no tab, website, or settings changes."""
+        data = self.discovery('/json/version')
+        if not isinstance(data.get('Browser'), str) or not data.get('Browser'):
+            raise connection_failure(ValueError('Missing Browser'), self.address, 'GET /json/version')
+        return browser_detail(data['Browser'])
 
     def connect(self):
         if self.ws:
@@ -151,22 +187,24 @@ class BrowserClient:
         try:
             import websocket
         except ImportError:
-            raise SiteError('FF Python에 websocket-client가 필요합니다. README의 설치 명령을 실행하세요.') from None
-        self.discovery('/json/version')
+            raise BrowserConnectionError('FF Python에 websocket-client가 필요합니다. README의 설치 명령을 실행하세요.') from None
+        self.check_connection()
         info = self.discovery('/json/new?about:blank', method='PUT')
         self.target = info.get('id')
         wsurl = urlsplit(info.get('webSocketDebuggerUrl', ''))
         if not self.target or not wsurl.path.startswith('/devtools/page/'):
-            raise SiteError('브라우저가 새 작업 탭 주소를 반환하지 않았습니다.')
+            raise BrowserConnectionError('브라우저가 새 작업 탭 주소를 반환하지 않았습니다. CDP 중계 응답을 확인하세요: ' + self.address)
         u = urlsplit(self.address)
         address = urlunsplit(('wss' if u.scheme == 'https' else 'ws', u.netloc, wsurl.path, '', ''))
         try:
             self.ws = websocket.create_connection(address, timeout=1, suppress_origin=True,
                                                   host='localhost', http_no_proxy=[u.hostname])
             self.call('Page.enable')
-        except Exception:
+        except Exception as exc:
             self.close()
-            raise SiteError('브라우저 WebSocket 연결 실패. CDP 중계 컨테이너를 확인하세요.') from None
+            if isinstance(exc, Cancelled):
+                raise
+            raise connection_failure(exc, self.address, 'WebSocket 연결') from None
 
     def call(self, method, params=None):
         self.check()
@@ -181,9 +219,9 @@ class BrowserClient:
             except Exception as exc:
                 if type(exc).__name__ in ('WebSocketTimeoutException', 'TimeoutError'):
                     continue
-                raise SiteError('브라우저 연결이 끊어졌습니다.') from None
+                raise connection_failure(exc, self.address, 'WebSocket 응답') from None
             if not raw or len(raw) > 12 * 1024 * 1024:
-                raise SiteError('브라우저 응답이 없거나 너무 큽니다.')
+                raise BrowserConnectionError('브라우저 응답이 없거나 너무 큽니다. CDP 중계 상태를 확인하세요: ' + self.address)
             message = json.loads(raw)
             if message.get('id') == ident:
                 if message.get('error'):
@@ -192,7 +230,7 @@ class BrowserClient:
                         raise NavigationPending('페이지 전환 중 실행 문맥 대기: ' + detail)
                     raise SiteError('브라우저 명령 실패 [' + method + ']: ' + detail)
                 return message.get('result', {})
-        raise SiteError('브라우저 응답 시간이 초과되었습니다.')
+        raise BrowserConnectionError('브라우저 응답 시간이 초과되었습니다. CDP 중계 상태를 확인하세요: ' + self.address)
 
     def evaluate(self, expression):
         response = self.call('Runtime.evaluate', {'expression': expression, 'returnByValue': True})

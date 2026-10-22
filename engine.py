@@ -17,11 +17,11 @@ from xml.sax.saxutils import escape
 
 try:
     from .parser import SiteError, Blocked, Locked, AccessLimited, Pending, Cancelled, parse_catalog, discover_legacy, origin, novel_id
-    from .browser_client import BrowserClient, NoRedirect, CatalogStructureError, DomainUnavailable
+    from .browser_client import BrowserClient, NoRedirect, CatalogStructureError, DomainUnavailable, BrowserConnectionError
     from .domain import DEFAULT_ANNOUNCEMENT, DEFAULT_BASE, fetch_announcement, discover_candidates, domain_candidates
 except ImportError:
     from parser import SiteError, Blocked, Locked, AccessLimited, Pending, Cancelled, parse_catalog, discover_legacy, origin, novel_id
-    from browser_client import BrowserClient, NoRedirect, CatalogStructureError, DomainUnavailable
+    from browser_client import BrowserClient, NoRedirect, CatalogStructureError, DomainUnavailable, BrowserConnectionError
     from domain import DEFAULT_ANNOUNCEMENT, DEFAULT_BASE, fetch_announcement, discover_candidates, domain_candidates
 
 ANNOUNCEMENT = DEFAULT_ANNOUNCEMENT
@@ -427,7 +427,7 @@ class Engine:
             except Cancelled:
                 client.base = old
                 raise
-            except (Blocked, Locked, AccessLimited) as exc:
+            except (Blocked, Locked, AccessLimited, BrowserConnectionError) as exc:
                 attempts.append({'url': client.base, 'requested_url': candidate, 'kind': kind, 'status': exc.code, 'message': str(exc)})
                 self.update(domain_attempts=attempts)
                 client.base = old

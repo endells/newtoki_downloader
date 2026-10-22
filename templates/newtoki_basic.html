@@ -61,7 +61,7 @@
 @media(max-width:650px){.nt-grid{grid-template-columns:1fr}.nt-card{padding:12px}.nt{padding:12px 8px}.nt .nt-scroll table td,.nt .nt-scroll table th{padding:7px;font-size:12px}}
 </style>
 <main class="nt">
-<h3>북토끼 소설 다운 <span class="badge">v0.2.23 · 테스트</span></h3>
+<h3>북토끼 소설 다운 <span class="badge">v0.2.24 · 테스트</span></h3>
 <section class="nt-status" aria-label="작업 상태">
  <div class="nt-row"><strong>작업 상태</strong><span id="state" class="nt-state" role="status">확인 중</span><button id="resume" class="primary" hidden>확인 후 계속</button><button id="stop" disabled>중지</button></div>
  <div id="verification-help" class="nt-note" hidden></div><div id="counts"></div><progress id="progress" value="0" max="1"></progress><div id="error" class="nt-error"></div><div id="domain-change"></div><div id="domain-attempts" class="nt-msg"></div>
@@ -114,6 +114,8 @@
 <div><label for="base_url">현재 확인된 접속 주소</label><input id="base_url" type="text" value="{{ config.base_url }}" placeholder="https://newtoki1.org"></div>
 <div><label for="browser_url">전용 브라우저 연결 주소</label><input id="browser_url" type="text" value="{{ config.browser_url }}"><small>동일 Docker 네트워크: http://newtoki-browser:9223</small></div>
 </div>
+<div class="nt-actions"><button id="browser-check">브라우저 연결 확인</button></div>
+<div id="browser-check-result" class="nt-note" role="status">입력한 브라우저 주소의 CDP 연결만 검사합니다. 설정 저장·사이트 접속·새 탭 생성은 하지 않습니다.</div>
 <label for="announcement_url">도메인 주소 안내 사이트</label><input id="announcement_url" type="text" value="{{ config.announcement_url }}" placeholder="https://뉴토주소.com/">
 <label for="domain_mode">주소 사용 방식</label>
 <select id="domain_mode"><option value="legacy_first" {% if config.domain_mode == 'legacy_first' %}selected{% endif %}>구주소 우선 · 연결 장애 시 새주소</option><option value="legacy_only" {% if config.domain_mode == 'legacy_only' %}selected{% endif %}>구주소만 사용</option><option value="modern_only" {% if config.domain_mode == 'modern_only' %}selected{% endif %}>새주소만 사용</option></select>
@@ -210,6 +212,7 @@ bind('folder-choose',()=>{$('download_path').value=folderPath;$('folder-picker')
 bind('check-path',async()=>{$('path-result').textContent=(await post('check_path',$('download_path').value)).storage.message;});
 bind('save',async()=>{const data={};{% for key in config %}if($({{key|tojson}})){const el=$({{key|tojson}});data[{{key|tojson}}]=el.type==='checkbox'?el.checked:el.value;}{% endfor %}msg((await post('save',JSON.stringify(data))).msg);});
 bind('save-connection',async()=>{const data={};for(const key of ['base_url','browser_url','announcement_url','auto_domain','domain_mode']){const el=$(key);data[key]=el.type==='checkbox'?el.checked:el.value;}msg((await post('save_connection',JSON.stringify(data))).msg);});
+bind('browser-check',async()=>{const button=$('browser-check'),result=$('browser-check-result');button.disabled=true;result.textContent='전용 브라우저 연결 확인 중…';try{result.textContent=(await post('browser_check',$('browser_url').value)).msg;}catch(e){result.textContent=e.message;throw e;}finally{button.disabled=false;}});
 bind('run',async()=>msg((await post('run')).msg));bind('domain',async()=>msg((await post('domain',$('probe').value)).msg));
 bind('analyze',async()=>{const d=await post('analyze',$('novel').value);analysis=null;rendered='';$('episodes').replaceChildren();$('book-title').textContent='작품과 저장 파일 확인 중';count();msg(d.msg);});bind('add-auto',async()=>msg((await post('add_auto',$('novel').value)).msg));
 

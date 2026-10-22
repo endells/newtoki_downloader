@@ -173,6 +173,21 @@ class FFTests(unittest.TestCase):
         self.assertEqual(self.module.config()['browser_url'],'http://127.0.0.1:9223')
         self.assertFalse(self.module.config()['auto_domain'])
 
+    def test_browser_connection_probe_uses_entered_address_without_changing_settings(self):
+        from unittest.mock import patch
+        old=self.module.config()['browser_url']
+        with patch('newtoki_downloader.mod_basic.BrowserClient') as factory:
+            factory.return_value.check_connection.return_value='Chrome/123'
+            factory.return_value.address='http://127.0.0.1:9223'
+            result=self.send('browser_check','http://127.0.0.1:9223')
+            self.assertEqual(result['ret'],'success')
+            self.assertIn('Chrome/123',result['msg'])
+            self.assertEqual(factory.call_args.args[1],'http://127.0.0.1:9223')
+            factory.return_value.check_connection.assert_called_once()
+            factory.return_value.connect.assert_not_called()
+        self.assertEqual(self.module.config()['browser_url'],old)
+        self.assertIsNone(self.module.engine.thread)
+
     def test_manual_defaults_removed_and_resume_command(self):
         from unittest.mock import patch
         import re

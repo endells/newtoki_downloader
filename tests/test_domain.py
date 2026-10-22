@@ -53,6 +53,15 @@ class Domains(unittest.TestCase):
         with self.assertRaises(SiteError):self.resolve()
         self.assertEqual(self.calls,['https://newtoki1.org','https://newtoki2.org'])
 
+    def test_browser_connection_failure_never_rotates_site_domains(self):
+        from browser_client import BrowserConnectionError
+        self.conf['domain_mode']='legacy_first'
+        self.outcomes['https://newtoki1.org']=BrowserConnectionError('CDP 연결 거부')
+        with self.assertRaisesRegex(BrowserConnectionError,'CDP 연결 거부'):self.resolve()
+        self.assertEqual(self.calls,['https://newtoki1.org'])
+        self.assertEqual(self.saved,[])
+        self.assertEqual(self.client.base,'https://newtoki1.org')
+
     def test_limits_and_locks_never_switch_domains(self):
         from parser import AccessLimited, Locked
         self.conf['domain_mode']='legacy_first'

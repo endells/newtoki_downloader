@@ -16,6 +16,7 @@ from .telegram_feed import TelegramFeed
 from .notifications import ActivityLog, DiscordNotifier
 from .storage import browse_folders, check_storage
 from .domain import announcement_url, DEFAULT_ANNOUNCEMENT, DEFAULT_BASE
+from .browser_client import BrowserClient
 
 
 class ModuleBasic(PluginModuleBase):
@@ -216,6 +217,11 @@ class ModuleBasic(PluginModuleBase):
             if not expected or not secrets.compare_digest(expected, req.form.get('csrf_token', '')):
                 return jsonify(ret='error', msg='페이지를 새로고침하세요.'), 403
             engine = self._engine()
+            if command == 'browser_check':
+                conf = self.config()
+                client = BrowserClient(conf['base_url'], arg1 or conf['browser_url'])
+                version = client.check_connection()
+                return jsonify(ret='success', msg='CDP 연결 정상: ' + client.address + ' · ' + version + ' (사이트 접속·새 탭 생성 없이 연결만 확인했습니다.)')
             if command == 'recent_books':
                 return jsonify(ret='success', rows=engine.recent_books())
             if command == 'file_folders':

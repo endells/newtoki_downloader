@@ -5,12 +5,49 @@ import shutil
 import subprocess
 import sys
 import unittest
+import urllib.error
+import socket
 from unittest.mock import Mock, patch
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from browser_client import BrowserClient, NavigationPending, BODY_EXPRESSION
+from browser_client import BrowserClient, BrowserConnectionError, NavigationPending, BODY_EXPRESSION
 from parser import SiteError
 
 class BrowserDiagnostics(unittest.TestCase):
+    def test_discovery_reports_stage_address_and_actionable_reason_without_response_body(self):
+        cases=[(urllib.error.URLError(ConnectionRefusedError(111,'Connection refused')),'연결 거부'),
+               (urllib.error.URLError(socket.gaierror(-2,'not found')),'호스트 이름'),
+               (urllib.error.URLError(TimeoutError('timeout')),'시간 초과'),
+               (urllib.error.HTTPError('http://localhost',502,'Bad gateway',{},None),'HTTP 502'),
+               (urllib.error.HTTPError('http://localhost',404,'Not Found',{},None),'HTTP 404')]
+        for error, expected in cases:
+            with self.subTest(expected=expected):
+                c=BrowserClient('https://newtoki1.org','http://127.0.0.1:9223')
+                with patch('browser_client.urllib.request.build_opener') as opener:
+                    opener.return_value.open.side_effect=error
+                    with self.assertRaises(BrowserConnectionError) as caught:c.discovery('/json/version')
+                self.assertIn(expected,str(caught.exception))
+                self.assertIn('GET /json/version',str(caught.exception))
+                self.assertIn('http://127.0.0.1:9223',str(caught.exception))
+
+    def test_connection_check_is_readonly_and_rejects_wrong_port_content(self):
+        c=BrowserClient('https://newtoki1.org','http://127.0.0.1:9223')
+        c.discovery=Mock(return_value={'Browser':'Chrome/123.0','webSocketDebuggerUrl':'ws://localhost/?token=do-not-show'})
+        c.call=Mock();c.connect=Mock()
+        self.assertEqual(c.check_connection(),'Chrome/123.0')
+        c.discovery.assert_called_once_with('/json/version')
+        c.call.assert_not_called();c.connect.assert_not_called()
+        self.assertIsNone(c.target)
+        c.discovery.return_value={'unrelated':'json'}
+        with self.assertRaisesRegex(BrowserConnectionError,'JSON 응답'):c.check_connection()
+        response=Mock();response.__enter__=Mock(return_value=response);response.__exit__=Mock(return_value=False)
+        response.read.return_value=b'<html>secret session token=hidden</html>'
+        with patch('browser_client.urllib.request.build_opener') as opener:
+            opener.return_value.open.return_value=response
+            del c.discovery
+            with self.assertRaises(BrowserConnectionError) as caught:c.discovery('/json/version')
+        self.assertNotIn('hidden',str(caught.exception))
+        self.assertIn('CDP JSON 응답 형식 오류',str(caught.exception))
+
     def test_javascript_error_details_are_preserved_and_redacted(self):
         c=BrowserClient('https://newtoki1.org','http://127.0.0.1:9222')
         c.call=Mock(return_value={'exceptionDetails':{'exception':{'description':"TypeError: token=secretvalue https://newtoki1.org/?token=private\n    at secret stack"}}})
