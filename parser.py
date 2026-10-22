@@ -264,10 +264,18 @@ def parse_modern_catalog(doc, url):
         href = urljoin(base, link.attrs.get('href', ''))
         target = urlsplit(href)
         match = re.fullmatch(r'/novel/' + re.escape(nid) + r'/([1-9][0-9]*)/?', target.path)
-        no = re.fullmatch(r'([0-9]+)\s*(?:화|회)?', clean(number.text()))
-        if not match or origin(href) != base or not no:
-            raise SiteError('새 목록의 ID/회차 번호/도메인이 일치하지 않습니다.')
-        eid, value = match[1], int(no[1])
+        no = re.fullmatch(r'([0-9]+|[1-9][0-9]{0,2}(?:,[0-9]{3})+)\s*(?:화|회)?', clean(number.text()))
+        if not match:
+            raise SiteError('새 목록의 작품/회차 경로가 다릅니다: 요청 작품 %s · 링크 경로 %s' % (nid, target.path[:100]))
+        if not no:
+            raise SiteError('새 목록의 회차 번호 형식을 확인하지 못했습니다: ' + clean(number.text())[:40])
+        link_base = origin(href)
+        modern_alias = all(re.fullmatch(r'toki[0-9]+\.(?:com|org|net)', urlsplit(value).hostname or '') for value in (base, link_base))
+        if link_base != base and not modern_alias:
+            raise SiteError('새 목록의 도메인이 다릅니다: 현재 %s · 링크 %s' % (urlsplit(base).hostname, target.hostname))
+        # An advertised older toki host can remain in links after a normal redirect.
+        # Keep its validated work/episode path, and navigate only on the current host.
+        eid, value = match[1], int(no[1].replace(',', ''))
         if row.attrs.get('data-episode-id', eid) != eid or row.attrs.get('data-ep', str(value)) != str(value):
             raise SiteError('새 목록의 표시 회차와 데이터가 일치하지 않습니다.')
         if eid in seen or value in numbers:

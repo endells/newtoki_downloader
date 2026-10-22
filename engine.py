@@ -27,6 +27,13 @@ except ImportError:
 ANNOUNCEMENT = DEFAULT_ANNOUNCEMENT
 
 
+class CatalogReloadRequired(SiteError):
+    """Replace the remaining queue from a validated destination catalog."""
+    def __init__(self, book, previous):
+        super().__init__('새주소 목록으로 남은 회차를 다시 구성합니다.')
+        self.book, self.previous = book, previous
+
+
 def now():
     return datetime.now(timezone.utc).isoformat(timespec='seconds')
 
@@ -332,8 +339,8 @@ class Engine:
                 self.update(status='running', last_error='', message='확인한 작업 탭에서 작품 목록 읽는 중')
                 resumed = True
 
-    def open_manual_handoff(self, client, nid, item, config):
-        """Navigate once to the modern viewer, then require an explicit human resume."""
+    def reload_modern_catalog(self, client, nid, config):
+        """Reload the destination list first, pausing wherever human verification appears."""
         previous = client.base
         day = korean_day()
         try:
@@ -345,48 +352,28 @@ class Engine:
             modern = []
             self.update(warnings=True, last_warning='새주소 안내 확인 실패: ' + str(exc))
         client.base = modern[0] if modern else DEFAULT_MODERN
-        try:
-            client.html('/novel/%s/%s' % (nid, item['id']))
-        except Blocked:
-            pass  # The human must complete this visible destination's verification.
-        except Exception:
-            client.base = previous
-            raise
-        if not urlsplit(client.base).hostname.startswith('toki'):
-            client.base = previous
-            raise SiteError('새주소 뷰어로 이동하지 못했습니다.')
-        client.keep_tab = True
-        return {'base': previous, 'day': day}
-
-    def confirm_manual_handoff(self, client, nid, item, config, previous):
-        """After human confirmation, validate work/catalog before accepting the new route."""
+        self.update(base_url=client.base, verification_context='', message='새주소 작품 목록 다시 불러오는 중 · 인증이 나오면 확인 후 계속을 누르세요.')
         alternate = collect_catalog(client, nid, self.update, lambda path: self.read_page(client, path, catalog=True))
         if alternate['title'] != self.book_info(nid)['title']:
             raise SiteError('새주소의 작품 제목이 기존 작품과 다릅니다. 이어받기를 중단합니다.')
-        match = next((e for e in alternate['episodes'] if e['id'] == item['id']), None)
-        if not match or match['no'] != item['no']:
-            raise SiteError('새주소의 회차 ID/번호가 다릅니다. 다시 작품 분석을 실행하세요.')
-        if match['locked']:
-            raise Locked('새주소에서 해당 회차가 잠겨 있습니다.')
+        return CatalogReloadRequired(alternate, {'base': previous, 'day': day})
+
+    def accept_reloaded_catalog(self, client, config, previous):
         save = config.get('save_domain')
         if save:
             save(client.base)
         self.history.query('INSERT OR REPLACE INTO verified_domain_handoff VALUES (1,?,?)', (previous['day'], client.base))
         self.update(base_url=client.base, domain_change={'old': previous['base'], 'new': client.base, 'time': now()},
-                    verification_context='', last_error='', message='새주소 직접 인증과 작품·회차 확인 완료 · 이어받습니다.')
+                    verification_context='', last_error='', message='새주소 목록과 기존 저장 파일 확인 완료 · 남은 회차를 이어받습니다.')
 
     def read_body(self, client, nid, item, on_wait=None, config=None):
         resumed, retries, announced = False, 0, False
         switched = False
-        handoff_previous = None
         while True:
             self.stop_check()
             client.check()
             try:
                 text = client.continue_body(nid, item) if resumed else client.body(nid, item)
-                if handoff_previous is not None:
-                    self.confirm_manual_handoff(client, nid, item, config, handoff_previous)
-                    handoff_previous = None
                 client.keep_tab = False
                 return text
             except Blocked as exc:
@@ -404,12 +391,10 @@ class Engine:
                         and config.get('auto_domain') and config.get('domain_mode', 'legacy_first') == 'legacy_first'
                         and urlsplit(client.base).hostname.startswith('newtoki')):
                     switched = True
-                    handoff_previous = self.open_manual_handoff(client, nid, item, config)
-                    self.update(base_url=client.base, verification_context='modern_handoff')
-                handoff_wait = handoff_previous is not None
+                    raise self.reload_modern_catalog(client, nid, config)
                 self.update(status='verification_waiting', last_error=str(exc),
                             verification_url=client.base + '/novel/%s/%s' % (nid, item['id']),
-                            message=('새주소 직접 인증 대기' if handoff_wait else '보안 확인 대기') + ' · 현재 %s회차 / %s편 저장 완료 · 전용 브라우저에서 인증 후 확인 후 계속을 누르세요.' % (item['no'], self.snapshot().get('completed', 0)))
+                            message='보안 확인 대기 · 현재 %s회차 / %s편 저장 완료 · 전용 브라우저에서 인증 후 확인 후 계속을 누르세요.' % (item['no'], self.snapshot().get('completed', 0)))
                 if self.on_verification and not announced:
                     try:
                         self.on_verification(self.snapshot())
@@ -436,20 +421,21 @@ class Engine:
                     raise SiteError('대체 주소의 회차 ID/번호가 다릅니다. 다시 작품 분석을 실행하세요.')
                 if match['locked']:
                     raise Locked('대체 주소에서 해당 회차가 잠겨 있습니다.')
-            except Pending:
-                if handoff_previous is not None:
-                    self.resume_signal.clear()
-                    client.keep_tab = True
-                    self.update(status='verification_waiting',
-                                message='새주소 본문이 아직 준비되지 않았습니다. 직접 인증과 본문 표시를 확인한 뒤 계속을 누르세요.')
-                    while not self.resume_signal.wait(.5):
-                        self.stop_check()
-                        client.check()
-                    self.stop_check()
-                    self.update(status='running', last_error='', message='새주소의 현재 회차를 다시 확인합니다.')
-                    resumed = True
-                    continue
+            except Pending as exc:
                 if retries >= 1:
+                    if resumed and not isinstance(exc, EmptyBody):
+                        client.keep_tab = True
+                        self.resume_signal.clear()
+                        self.update(status='verification_waiting', last_error=str(exc),
+                                    verification_url=client.base + '/novel/%s/%s' % (nid, item['id']),
+                                    message='확인한 본문이 아직 준비되지 않았습니다. 같은 탭에서 표시 완료 후 확인 후 계속을 누르세요.')
+                        while not self.resume_signal.wait(.5):
+                            self.stop_check()
+                            client.check()
+                        self.stop_check()
+                        retries = 0
+                        self.update(status='running', last_error='', message='확인한 작업 탭에서 현재 회차 본문 읽는 중')
+                        continue
                     raise
                 retries += 1
                 self.update(message='일시적 본문 로딩 지연 · 2초 후 같은 회차를 한 번 다시 확인합니다.')
@@ -685,7 +671,9 @@ class Engine:
                     metadata = {k: v for k, v in book.items() if k != 'episodes'}
                     atomic_write(safe_path(folder, 'metadata.json'), json.dumps(metadata, ensure_ascii=False, indent=2).encode('utf-8'))
                     atomic_write(safe_path(folder, 'info.xml'), ('<?xml version="1.0" encoding="utf-8"?><book><title>' + escape(book['title']) + '</title><author>' + escape(book['author']) + '</author></book>').encode('utf-8'))
-                    for i, item in enumerate(candidates):
+                    i = 0
+                    while i < len(candidates):
+                        item = candidates[i]
                         client.check()
                         if batch_count >= batch_size:
                             self.batch_rest(batch_pause)
@@ -706,6 +694,49 @@ class Engine:
                             downloads.append(dict(novel_id=nid, title=book['title'], no=item['no'], episode_title=item['title']))
                             self.update(completed=self.snapshot()['completed'] + 1)
                             batch_count += 1
+                        except CatalogReloadRequired as reload:
+                            alternate = reload.book
+                            remaining = {int(e['no']) for e in candidates[i:]}
+                            available = {int(e['no']) for e in alternate['episodes']}
+                            if not remaining.issubset(available):
+                                raise SiteError('새주소 목록에 남은 선택 회차 번호가 없습니다: ' + ', '.join(map(str, sorted(remaining - available))))
+                            self.history.cache_catalog(alternate)
+                            local = reconcile_book(root, self.history, alternate, client.check, self.update)
+                            self.update(history_imported=self.snapshot().get('history_imported', 0) + local['imported'] + local['refreshed'],
+                                        history_missing=self.snapshot().get('history_missing', 0) + local['missing'])
+                            next_items, newly_skipped = [], 0
+                            records = self.history.rows(nid)
+                            records_by_id = {r['episode_id']: r for r in records}
+                            claims = {}
+                            for record in records:
+                                if record['status'] == 'completed':
+                                    claims.setdefault((record['no'], record['path']), set()).add(record['episode_id'])
+                            for entry in alternate['episodes']:
+                                row = records_by_id.get(entry['id'])
+                                entry['have'] = bool(row and valid_record(row, root))
+                                if entry['have']:
+                                    # Retire the old-domain ID only when it names the exact same saved file/ordinal.
+                                    if claims.get((entry['no'], row['path']), set()) - {entry['id']}:
+                                        self.history.query("DELETE FROM entries WHERE novel_id=? AND episode_id<>? AND no=? AND path=? AND status='completed'",
+                                                           (nid, entry['id'], entry['no'], row['path']))
+                                if int(entry['no']) not in remaining:
+                                    continue
+                                if entry['have'] or entry['locked']:
+                                    newly_skipped += 1
+                                    if entry['locked'] and not entry['have']:
+                                        self.history.record(nid, entry, 'locked', error='새주소 목록에 잠금/유료 표시')
+                                else:
+                                    next_items.append(entry)
+                            book = alternate
+                            candidates[i:] = sorted(next_items, key=lambda e: int(e['no']))
+                            self.history.query('INSERT OR REPLACE INTO books VALUES (?,?,?,?)', (nid, book['title'], book['author'], now()))
+                            metadata = {k: v for k, v in book.items() if k != 'episodes'}
+                            atomic_write(safe_path(folder, 'metadata.json'), json.dumps(metadata, ensure_ascii=False, indent=2).encode('utf-8'))
+                            self.accept_reloaded_catalog(client, config, reload.previous)
+                            self.update(analysis=book, total=len(candidates), done=i,
+                                        skipped=self.snapshot()['skipped'] + newly_skipped,
+                                        message='새주소 목록 재분석 완료 · 저장 파일을 제외한 남은 %s회차를 진행합니다.' % len(next_items))
+                            continue
                         except Locked as exc:
                             if not self.history.valid(nid, item, root):
                                 self.history.record(nid, item, 'locked', error=str(exc))
@@ -731,6 +762,7 @@ class Engine:
                             self.update(failed=self.snapshot()['failed'] + 1, last_error=str(exc))
                             raise
                         self.update(done=i + 1)
+                        i += 1
                     self.export(folder, book, root, config, client)
             empty_count = len(self.snapshot().get('empty_episodes', []))
             self.update(status='completed', message=('완료 · 본문 없음 %s회차 미저장' % empty_count) if empty_count else '완료', finished=now())
