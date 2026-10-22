@@ -32,6 +32,9 @@ class NotificationTests(unittest.TestCase):
         self.assertIn('회차: 0001', self.sent[0])
         self.assertNotIn('시작',self.sent[0])
         self.assertIn('자동 수집', self.sent[0])
+        self.assertIn('시험 작품 — 1회 저장', self.sent[0])
+        self.assertNotIn('/novel/', self.sent[0])
+        self.assertNotIn('https://', self.sent[0])
         self.notifier.test()
         self.assertIn('테스트', self.sent[-1])
 

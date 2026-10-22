@@ -110,8 +110,7 @@ def summary_messages(report):
         group = grouped.setdefault(item['novel_id'], {'title': item['title'], 'episodes': []})
         group['episodes'].append(int(item['no']))
     for nid, group in grouped.items():
-        lines += ['', '%s — %s회 저장' % (group['title'][:180], len(set(group['episodes']))),
-                  report.get('base_url', 'https://newtoki1.org') + '/novel/' + nid]
+        lines += ['', '%s — %s회 저장' % (group['title'][:180], len(set(group['episodes'])))]
         lines += list(range_lines(group['episodes']))
     if state.get('history_imported'):
         lines += ['파일명 회차로 이력 반영: %s회' % state['history_imported']]
